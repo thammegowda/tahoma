@@ -1,6 +1,9 @@
-#include <torch/torch.h>
 #include <iostream>
 #include <string>
+
+#include <torch/torch.h>
+#include <argparse.hpp>
+
 
 // Define a new Module.
 struct Net : torch::nn::Module {
@@ -9,15 +12,17 @@ struct Net : torch::nn::Module {
     fc1 = register_module("fc1", torch::nn::Linear(784, 256));
     fc2 = register_module("fc2", torch::nn::Linear(256, 64));
     fc3 = register_module("fc3", torch::nn::Linear(64, 10));
+    //dummy one added but not used
     fc4 = register_module("fc4", torch::nn::ModuleList(
-      torch::nn::Linear(64, 10), torch::nn::Linear(64, 10))
-      );
+      torch::nn::Linear(64, 10),
+      torch::nn::Linear(64, 10))
+    );
   }
 
   // Implement the Net's algorithm.
   torch::Tensor forward(torch::Tensor x) {
     // Use one of many tensor manipulation functions.
-    x = x.reshape({x.size(0), 784});
+    x = x.reshape({ x.size(0), 784 });
 
     x = fc1->forward(x);
     x = torch::relu(x);
@@ -32,30 +37,41 @@ struct Net : torch::nn::Module {
   }
 
   // Use one of many "standard library" modules.
-  torch::nn::Linear fc1{nullptr}, fc2{nullptr}, fc3{nullptr};
-  torch::nn::ModuleList fc4{nullptr};
+  torch::nn::Linear fc1{ nullptr }, fc2{ nullptr }, fc3{ nullptr };
+  torch::nn::ModuleList fc4{ nullptr };
 };
 
 
 //TODO: get args from command line
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
 
-  if (argc < 2) {
-    std::cout << "Usage: " << argv[0] << " <data_path>" << std::endl;
-    return 1;
+
+  argparse::ArgumentParser parser("mnist");
+  parser.add_argument("data_path")
+    .help("path to the MNIST data directory");
+
+  try {
+    parser.parse_args(argc, argv);
   }
+  catch (const std::runtime_error& err) {
+    std::cout << err.what() << std::endl;
+    std::cout << parser;
+    exit(0);
+  }
+
+  auto data_path = parser.get<std::string>("data_path");
   //auto data_path = "../data";
-  auto data_path = argv[1];
+  std::cout << "data_path: " << data_path << std::endl;
 
   // Create a new Net.
   auto net = std::make_shared<Net>();
 
   // Create a multi-threaded data loader for the MNIST dataset.
   auto data_loader = torch::data::make_data_loader(
-      torch::data::datasets::MNIST(data_path).map(
-          torch::data::transforms::Stack<>()),
-      /*batch_size=*/64);
+    torch::data::datasets::MNIST(data_path).map(
+      torch::data::transforms::Stack<>()),
+    /*batch_size=*/64);
 
   // Instantiate an SGD optimization algorithm to update our Net's parameters.
   torch::optim::SGD optimizer(net->parameters(), /*lr=*/0.01);
@@ -78,7 +94,7 @@ int main(int argc, char *argv[]) {
       // Output the loss and checkpoint every 100 batches.
       if (++batch_index % 100 == 0) {
         std::cout << "Epoch: " << epoch << " | Batch: " << batch_index
-                  << " | Loss: " << loss.item<float>() << std::endl;
+          << " | Loss: " << loss.item<float>() << std::endl;
         // Serialize your model periodically as a checkpoint.
         torch::save(net, "net.pt");
       }
