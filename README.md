@@ -1,17 +1,34 @@
 
 ## Setup
 
-We need `libtorch` in the compiler's environment, easiest way is to create conda environment and install pytorch.
+Currently working with CPU backend. Make sure to not have CUDA or torch+cuda libs in your environment (such as conda enviornment).
 
+
+Step 1:
+Download libtorch
 
 ```bash
-conda create -n rtgpp python=3.9
-conda activate rtgpp
+lib/setup.sh
+```
 
-# install pytorch (cpu only)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+Step2:
 
-# this is the path
-ls $(python -c 'import torch;print(torch.utils.cmake_prefix_path)')
+Install cmake, gcc etc. Note: we are coding based on C++20 standard.
 
+```bash
+sudo apt install gcc cmake
+```
+
+> TODO: update the exact set of libs and lower bound on versions to support C++20
+
+
+
+## Build
+
+```bash
+# create and cd into build dir
+mkdir build && cd build
+
+# build using cmake and make
+cmake .. && make
 ```
