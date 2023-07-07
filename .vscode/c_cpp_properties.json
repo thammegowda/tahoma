@@ -5,7 +5,7 @@
             "includePath": [
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/src/include",
-                "${workspaceFolder}/lib/libtorch/include/torch/csrc/api/include"
+                "${workspaceFolder}/libs/libtorch/include/torch/csrc/api/include"
             ],
             "defines": [],
             "cStandard": "c17",

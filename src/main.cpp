@@ -1,6 +1,7 @@
 #include <iostream>
 #include <argparse.hpp>
 #include <torch/torch.h>
+#include "../libs/sentencepiece/src/sentencepiece_processor.h"
 
 
 int main(int argc, char* argv[]) {

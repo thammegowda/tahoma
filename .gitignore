@@ -1,6 +1,6 @@
 build/
-lib/*
-!lib/setup.sh
+libs/*
+!libs/setup.sh
 data/*
 !data/setup.sh
 

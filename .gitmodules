@@ -1,0 +1,4 @@
+[submodule "sentencepiece"]
+	path = libs/sentencepiece
+	url = git@github.com:google/sentencepiece.git
+	branch = master

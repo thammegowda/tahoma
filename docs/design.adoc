@@ -1,0 +1,62 @@
+= RTG++
+:encoding: utf-8
+:toc: left
+:sectnums:
+:stem:
+
+## Design
+
+. Task
+. Model
+. Dataset
+. DataLoader
+. Optimizer
+. Experiment
+. Trainer
+. Evaluator
+. Logger
+. Config
+. Utils
+
+## Task
+
+[%autowidth,options="header"]
+|===
+| Task | Input -> Output | Classification | Regression
+
+| Translation
+| `Seq x Token` -> `Seq x Token` +
+where sequences are of variabe lengths
+| Yes, wraped in an autoregressor. `Softmax(R^k)`, where `k` is the number of tokens in the vocabulary.
+| (Not applicable)
+
+| Translation Evaluation (2seq)
+| `([Seq x Token], [Seq x Token]) -> R` +
+Input is a pair of sentences, i.e. +
+  i) `(hypothesis, source)` +
+  ii) `(hypothesis, reference)`
+| Yes, `sigmoid\(R)`
+| Yes, without sigmoid
+
+| Translation Evaluation (3seq)
+| `([Seq x Token], [Seq x Token], [Seq x Token])` +
+ i.e. hypothesis, source, and reference
+| ''
+| ''
+
+| Text classification
+| `Seq x Token` -> `R^k` +
+where sequences are of variabe lengths
+and `k` is the number of classes
+| Yes, `Softmax(R^k)` or `Sigmoid(R^k)` if `k=1`
+| Yes, `k=1` and dont use sigmoid
+
+
+| Image classification
+| `R^d` -> `R^k` +
+where `d` (fixed for all input images) is number of pixels and `k` is the number of classes.
+`R^d` is a vectorized image, it maybe also be reshared into a matrix of size `h x w`, or a tensor `h x w x c`, where h=height, w=width, and c=channels.
+| Yes, `Softmax(R^k)` or `Sigmoid(R^k)` if `k=1`
+| Yes, `k=1` and dont use sigmoid
+
+|===
