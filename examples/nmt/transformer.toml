@@ -1,0 +1,29 @@
+
+[model]
+name = "transformer"
+model_dim = 512
+src_vocab_size = 16_000
+tgt_vocab_size = 16_000
+encoder_layers = 12
+decoder_layers = 3
+attn_head = 8
+ffn_dim = 2048
+dropout = 0.1
+
+[optimizer]
+name = "adam"
+betas = [0.9, 0.98]
+eps = 1e-9
+weight_decay = 0.0001
+
+[trainer]
+batch_size = 64
+epochs = 100
+
+[dataset]
+train_src = "data/train.deu"
+train_tgt = "data/train.eng"
+dev_src = "data/dev.deu"
+dev_tgt = "data/dev.eng"
+vocab_src = "data/shared.16k.model"
+vocab_tgt = "data/shared.16k.model"

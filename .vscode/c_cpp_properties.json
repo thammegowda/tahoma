@@ -5,12 +5,16 @@
             "includePath": [
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/src/include",
-                "${workspaceFolder}/libs/libtorch/include/torch/csrc/api/include"
+                "${workspaceFolder}/libs/libtorch/include/torch/csrc/api/include",
+                "${workspaceFolder}/libs/sentencepiece/src",
+                "${workspaceFolder}/libs/spdlog/include",
+                "${workspaceFolder}/libs/tomlplusplus/include"
             ],
             "defines": [],
             "cStandard": "c17",
             "cppStandard": "c++20",
-            "intelliSenseMode": "linux-gcc-x64"
+            "intelliSenseMode": "linux-gcc-x64",
+            "compilerPath": "/usr/bin/g++"
         }
     ],
     "version": 4

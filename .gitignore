@@ -1,6 +1,5 @@
 build/
-libs/*
-!libs/setup.sh
+libs/libtorch
 data/*
 !data/setup.sh
 

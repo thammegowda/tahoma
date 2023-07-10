@@ -1,17 +1,6 @@
 #include <iostream>
 #include <toml.hpp>
 
-
-class Config {
-    private:
-        int d_model;
-        int nhead;
-        int num_encoder_layers;
-        int num_decoder_layers;
-    public:
-        std::string name;
-};
-
 int main(int argc, char** argv) {
     toml::table tbl;
     try {
