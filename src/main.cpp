@@ -1,18 +1,25 @@
 #include <iostream>
+#include <filesystem>
 #include <argparse.hpp>
-#include <torch/torch.h>
 #include <toml++/toml.h>
 #include <sentencepiece_processor.h>
-#include <spdlog/spdlog.h>
+
+#include <torch/torch.h>
+#include "common/commons.hpp"
 #include "nmt/transformer.hpp"
+#include "nmt/trainer.hpp"
+
 
 namespace nn = torch::nn;
-using namespace std;
+namespace optim = torch::optim;
+namespace fs = std::filesystem;
+
 
 namespace rtg {
     auto load_config(const std::string& filename) -> toml::table {
         try {
             toml::table tbl = toml::parse_file(filename);
+            std::cerr << tbl << "\n";
             return tbl;
         }
         catch (const toml::parse_error& err) {
@@ -22,15 +29,11 @@ namespace rtg {
     }
 
     auto parse_args(int argc, char* argv[]) -> argparse::ArgumentParser {
-        argparse::ArgumentParser parser("rtgpp");
+        argparse::ArgumentParser parser("rtgp");
         parser.add_argument("-v", "--verbose").help("Increase log verbosity")
             .default_value(false).implicit_value(true);
-        parser.add_argument("-c", "--config").help("Config file").required();
-        //parser.add_argument("-f", "--foo").help("foo help").default_value(42);
-        //parser.add_argument("-b", "--bar").help("bar help");
-        //parser.add_argument("-n", "--num").help("num help").default_value(20).scan<'i', int>();
-        //parser.add_argument("-r", "--real").help("real help").default_value(20.0).scan<'f', float>();
-        //program.add_argument("-m", "--model").help("model name");
+        parser.add_argument("work_dir").help("Working directory").required();
+        parser.add_argument("-c", "--config").help("Config file. Optional: default is config.toml in work_dir");
 
         try {
             parser.parse_args(argc, argv);
@@ -43,50 +46,67 @@ namespace rtg {
         return parser;
     }
 
+    auto init_data(toml::table config) -> void {
+        if (!config["data"]) {
+            spdlog::error("[data] config block not found");
+            throw std::runtime_error("[data] config block not found");
+        }
+        auto data_conf = config["data"];
+        std::cout << data_conf << "\n";
+        std::cout << data_conf["train"] << "\n";
+        std::cout << data_conf["validation"] << "\n";
+        std::cout << data_conf["vocabulary"] << "\n";
+        std::cout << data_conf["max_length"] << "\n";
+    }
+
 } // namespace rtg
 
+
 int main(int argc, char* argv[]) {
-    spdlog::info("main started");
-    spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [t%t] [%^%l%$] %v");
+
+    int _code = global_setup();
+    if (_code != 0){
+        return _code;
+    }
 
     auto args = rtg::parse_args(argc, argv);
-    spdlog::set_level(args.get<bool>("verbose") ? spdlog::level::debug : spdlog::level::info);
-
-    toml::table config = rtg::load_config(args.get<std::string>("config"));
-    std::cerr << config << "\n";
-
-
-    std::cout << config["model"] << "\n";
-
-    if (!config["model"]) {
-        spdlog::error("[model] config block not found");
-        return 1;
+    if (args.get<bool>("verbose")) {
+        spdlog::set_level(spdlog::level::debug);
     }
 
-    // check if model_dim, nhead, num_encoder_layers, num_decoder_layers are present
-    auto required_keys = {"model_dim", "attn_head", "encoder_layers", "decoder_layers", "dropout", "ffn_dim"};
-    for (auto& key : required_keys) {
-        if (!config["model"].as_table()->contains(key)) {
-            spdlog::error("model config: {} not found", key);
-            return 1;
-        }
+    auto work_dir = fs::path {args.get<std::string>("work_dir")};
+    spdlog::info("work_dir: {}", work_dir);
+    auto config_file_arg = args.get<std::string>("config");
+    fs::path config_file =  work_dir / "config.toml";
+    if (!fs::exists(work_dir)){
+        spdlog::info("Creating work dir {}", work_dir);
+        fs::create_directories(work_dir);
     }
-    // value<T>() returns optional<T>, and then value() returns T
-    auto d_model = config["model"]["model_dim"].value_or<int64_t>(-1);
-    auto nhead = config["model"]["attn_head"].value_or<int64_t>(-1);
-    auto num_encoder_layers = config["model"]["encoder_layers"].value_or<int64_t>(6);
-    auto num_decoder_layers = config["model"]["decoder_layers"].value_or<int64_t>(6);
-    auto dropout = config["model"]["dropout"].value_or<double>(0.1);
-    auto ffn_dim = config["model"]["ffn_dim"].value_or<double>(d_model * 4);
+    if (!config_file_arg.empty()){
+        spdlog::info("copying config file {} -> {}", config_file_arg, config_file);
+        fs::copy(fs::path(config_file_arg), config_file,
+                    fs::copy_options::overwrite_existing);
+    }
+    if (!fs::exists(config_file)) {
+        spdlog::error("config file {} not found", config_file);
+        throw std::runtime_error("config file" + std::string(config_file) + "not found");
+    }
 
-    auto model_config = nn::TransformerOptions(d_model, nhead)
-        .num_encoder_layers(num_encoder_layers)
-        .dim_feedforward(ffn_dim)
-        .dropout(dropout)
-        .num_decoder_layers(num_decoder_layers);
-    auto model = nn::Transformer(model_config);
-    std::cout << model << "\n";
+    toml::table config = rtg::load_config(config_file);
+    rtg::init_data(config);
+    auto model = rtg::nmt::transformer::init_model(config);
+    auto criterion = nn::CrossEntropyLoss();
+    auto optimizer = optim::Adam(model.ptr() -> parameters(), optim::AdamOptions(0.0001));
+    auto scheduler = optim::StepLR(optimizer, 1.0, 0.95);
 
-    spdlog::info("main finished");
+    auto trainer = rtg::trainer::Trainer(nn::AnyModule(model), optimizer, scheduler, nn::AnyModule(criterion));
+    rtg::trainer::TrainerOptions options {
+        .data_paths = { "data/train.src", "data/train.tgt" },
+        .vocab_paths = { "data/vocab.src", "data/vocab.tgt" },
+        .epochs = 10,
+        .batch_size = 32
+    };
+    trainer.train(options);
+    spdlog::info("main finished..");
     return 0;
 }

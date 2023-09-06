@@ -20,10 +20,9 @@ weight_decay = 0.0001
 batch_size = 64
 epochs = 100
 
-[dataset]
-train_src = "data/train.deu"
-train_tgt = "data/train.eng"
-dev_src = "data/dev.deu"
-dev_tgt = "data/dev.eng"
-vocab_src = "data/shared.16k.model"
-vocab_tgt = "data/shared.16k.model"
+[data]
+train = ["data/train.deu", "data/train.eng"]
+validation = ["data/dev.deu",  "data/dev.eng"]
+vocabulary = ["data/shared.16k.model", "data/shared.16k.model"]
+max_length = [100, 100]
+max_length_crop = true
