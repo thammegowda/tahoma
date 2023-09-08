@@ -4,11 +4,18 @@
 Currently working with CPU backend. Make sure to not have CUDA or torch+cuda libs in your environment (such as conda enviornment).
 
 
-Step 1:
-Download libtorch
+Step 0: Download source code
 
 ```bash
-lib/setup.sh
+
+git submodule update --init --recursive
+```
+
+
+Step 1: Download libtorch
+
+```bash
+libs/setup.sh
 ```
 
 Step2:
@@ -32,8 +39,12 @@ sudo apt install libdw-dev libunwind-dev
 # create and cd into build dir
 mkdir build && cd build
 
-# build using cmake and make
-cmake .. && make -j
+# build using cmake and default compiler
+cmake ..
+# build using your specifed compiler. Eg. clang-12
+CC=clang-12 CXX=clang++-12 cmake ..
+# compile
+make -j
 
 # sample run
 ./rtgp workdir -c ../examples/nmt/transformer.toml
