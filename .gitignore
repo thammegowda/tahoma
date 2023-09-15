@@ -3,4 +3,6 @@ libs/libtorch
 data/*
 !data/setup.sh
 
+.history*
+
 .vscode/settings.json

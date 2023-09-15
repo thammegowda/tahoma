@@ -11,6 +11,7 @@ list(APPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/libs/libtorch" CACHE 
 
 find_package(Torch REQUIRED)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+set(EXT_LIBS "${TORCH_LIBRARIES}")
 
 include_directories(
     "${CMAKE_SOURCE_DIR}/libs/libtorch/include/torch/csrc/api/include"
