@@ -4,7 +4,8 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/libs/libtorch/include/torch/csrc/api/include"
+                "${workspaceFolder}/libs/libtorch/include/torch/csrc/api/include",
+                "${workspaceFolder}/libs/tomlplusplus/include"
             ],
             "defines": [],
             "intelliSenseMode": "linux-gcc-x64",

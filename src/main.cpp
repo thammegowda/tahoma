@@ -6,8 +6,10 @@
 
 #include <torch/torch.h>
 #include "common/commons.hpp"
+#include "common/config.hpp"
 #include "nmt/transformer.hpp"
 #include "nmt/trainer.hpp"
+
 
 
 namespace nn = torch::nn;
@@ -16,18 +18,7 @@ namespace fs = std::filesystem;
 
 
 namespace rtg {
-    auto load_config(const std::string& filename) -> toml::table {
-        try {
-            toml::table tbl = toml::parse_file(filename);
-            std::cerr << tbl << "\n";
-            return tbl;
-        }
-        catch (const toml::parse_error& err) {
-            std::cerr << "Parsing failed:\n" << err << "\n";
-            throw err;
-        }
-    }
-
+    
     auto parse_args(int argc, char* argv[]) -> argparse::ArgumentParser {
         argparse::ArgumentParser parser("rtgp");
         parser.add_argument("-v", "--verbose").help("Increase log verbosity")
@@ -46,18 +37,7 @@ namespace rtg {
         return parser;
     }
 
-    auto init_data(toml::table config) -> void {
-        if (!config["data"]) {
-            spdlog::error("[data] config block not found");
-            throw std::runtime_error("[data] config block not found");
-        }
-        auto data_conf = config["data"];
-        std::cout << data_conf << "\n";
-        std::cout << data_conf["train"] << "\n";
-        std::cout << data_conf["validation"] << "\n";
-        std::cout << data_conf["vocabulary"] << "\n";
-        std::cout << data_conf["max_length"] << "\n";
-    }
+   
 
 } // namespace rtg
 
@@ -92,20 +72,33 @@ int main(int argc, char* argv[]) {
         throw std::runtime_error("config file" + std::string(config_file) + "not found");
     }
 
-    toml::table config = rtg::load_config(config_file);
-    rtg::init_data(config);
+    auto config = rtg::config::Config(config_file);
     auto model = rtg::nmt::transformer::init_model(config);
     auto criterion = nn::CrossEntropyLoss();
     auto optimizer = optim::Adam(model.ptr() -> parameters(), optim::AdamOptions(0.0001));
     auto scheduler = optim::StepLR(optimizer, 1.0, 0.95);
 
-    auto trainer = rtg::trainer::Trainer(nn::AnyModule(model), optimizer, scheduler, nn::AnyModule(criterion));
+
+    //std::vector<std::string> data_paths { "data/train.src", "data/train.tgt" };
+    //std::vector<std::string> vocab_paths { "data/vocab.src", "data/vocab.tgt" };
+    /* lambda to comvert toml array to vector of strings */
+    auto as_string_vector = [](const toml::array& arr) -> std::vector<std::string> {
+        std::vector<std::string> vec;
+        for (const auto& v : arr) {vec.push_back(v.as_string()->get());}
+        return vec;
+    };
+    auto data_paths = as_string_vector(*config["trainer"]["data"].as_array());
+    auto vocab_paths =  as_string_vector(*config["schema"]["vocabs"].as_array());
+
     rtg::trainer::TrainerOptions options {
-        .data_paths = { "data/train.src", "data/train.tgt" },
-        .vocab_paths = { "data/vocab.src", "data/vocab.tgt" },
+        .data_paths = data_paths,
+        .vocab_paths = vocab_paths,
         .epochs = 10,
         .batch_size = 32
     };
+
+    auto trainer = rtg::trainer::Trainer(nn::AnyModule(model),
+                     optimizer, scheduler, nn::AnyModule(criterion), options);
     trainer.train(options);
     spdlog::info("main finished..");
     return 0;

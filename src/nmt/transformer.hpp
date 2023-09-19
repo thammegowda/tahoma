@@ -1,12 +1,15 @@
 #include <iostream>
 #include <torch/torch.h>
+#include <toml++/toml.h>
+#include "../common/config.hpp"
 
 
 namespace nn = torch::nn;
+using namespace rtg;
 
 namespace rtg::nmt::transformer {
 
-    auto init_model(toml::table config) -> nn::Transformer {
+    auto init_model(config::Config config) -> nn::Transformer {
         if (!config["model"]) {
             spdlog::error("[model] config block not found");
             throw std::runtime_error("[model] config block not found");

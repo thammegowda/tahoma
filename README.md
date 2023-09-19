@@ -23,9 +23,10 @@ Step2:
 Install cmake, gcc etc. Note: we are coding based on C++20 standard.
 
 ```bash
-sudo apt install gcc cmake
-
-# to get debug stacktrace on crash
+sudo apt install gcc cmake build-essential pkg-config libgoogle-perftools-dev
+ 
+# Using backwards-cpp to get debug stacktrace on crashes/exceptions
+# And we need these for backwards-cpp to work
 sudo apt install libdw-dev libunwind-dev
 ```
 
