@@ -3,22 +3,25 @@
 #include <iostream>
 #include <filesystem>
 #include <string>
-#include <toml++/toml.h>
+#include <vector>
+#include <type_traits>
+//#include <toml++/toml.h>
+#include <yaml-cpp/yaml.h>
 #include "commons.hpp"
 
 
 namespace rtg::config {
-    class Config: public toml::table {
+    class Config: public YAML::Node {
     
     public:
         Config(const std::string& filename, bool validate = true)
-        : toml::table(toml::parse_file(filename)) {
+        : YAML::Node {YAML::LoadFile(filename)} {
             if (validate){
                 validate_config(*this);
             }
         }
 
-        static auto validate_config(toml::table config) -> void {
+        static auto validate_config(const YAML::Node& config) -> void {
             std::vector<std::string> expected_keys = { "model", "schema", "optimizer", "trainer", "validator" };
             for (auto key : expected_keys) {
                 if (!config[key]) {
@@ -27,5 +30,7 @@ namespace rtg::config {
                 }
             }
         }
+
     };
+    
 } // namespace rtg::config

@@ -1,7 +1,7 @@
 #include <iostream>
 #include <filesystem>
 #include <argparse.hpp>
-#include <toml++/toml.h>
+//#include <toml++/toml.h>
 #include <sentencepiece_processor.h>
 
 #include <torch/torch.h>
@@ -57,7 +57,7 @@ int main(int argc, char* argv[]) {
     auto work_dir = fs::path {args.get<std::string>("work_dir")};
     spdlog::info("work_dir: {}", work_dir);
     auto config_file_arg = args.get<std::string>("config");
-    fs::path config_file =  work_dir / "config.toml";
+    fs::path config_file =  work_dir / "config.yaml";
     if (!fs::exists(work_dir)){
         spdlog::info("Creating work dir {}", work_dir);
         fs::create_directories(work_dir);
@@ -73,22 +73,14 @@ int main(int argc, char* argv[]) {
     }
 
     auto config = rtg::config::Config(config_file);
-    auto model = rtg::nmt::transformer::init_model(config);
+    auto model = rtg::nmt::transformer::TransformerNMT(config);
+
     auto criterion = nn::CrossEntropyLoss();
-    auto optimizer = optim::Adam(model.ptr() -> parameters(), optim::AdamOptions(0.0001));
+    auto optimizer = optim::Adam(model->parameters(), optim::AdamOptions(0.0001));
     auto scheduler = optim::StepLR(optimizer, 1.0, 0.95);
 
-
-    //std::vector<std::string> data_paths { "data/train.src", "data/train.tgt" };
-    //std::vector<std::string> vocab_paths { "data/vocab.src", "data/vocab.tgt" };
-    /* lambda to comvert toml array to vector of strings */
-    auto as_string_vector = [](const toml::array& arr) -> std::vector<std::string> {
-        std::vector<std::string> vec;
-        for (const auto& v : arr) {vec.push_back(v.as_string()->get());}
-        return vec;
-    };
-    auto data_paths = as_string_vector(*config["trainer"]["data"].as_array());
-    auto vocab_paths =  as_string_vector(*config["schema"]["vocabs"].as_array());
+    auto data_paths = config["trainer"]["data"].as<std::vector<std::string>>();
+    auto vocab_paths = config["schema"]["vocabs"].as<std::vector<std::string>>();
 
     rtg::trainer::TrainerOptions options {
         .data_paths = data_paths,
@@ -97,8 +89,7 @@ int main(int argc, char* argv[]) {
         .batch_size = 32
     };
 
-    auto trainer = rtg::trainer::Trainer(nn::AnyModule(model),
-                     optimizer, scheduler, nn::AnyModule(criterion), options);
+    auto trainer = rtg::trainer::Trainer<rtg::nmt::transformer::TransformerNMT, nn::CrossEntropyLoss>(model, criterion, optimizer, scheduler, options);
     trainer.train(options);
     spdlog::info("main finished..");
     return 0;

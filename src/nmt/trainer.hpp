@@ -2,7 +2,8 @@
 #include <coroutine>
 #include <fstream>
 #include <ranges>
-#include <__generator.hpp>  //reference implementation of std::generator
+#include <memory>
+#include <__generator.hpp>  //reference implementation of generator
 #include <torch/torch.h>
 #include <sentencepiece_processor.h>
 #include "../common/utils.hpp"
@@ -13,115 +14,121 @@ namespace optim = torch::optim;
 namespace fs = std::filesystem;
 namespace sp = sentencepiece;
 
+using namespace std;
+
+
+//torch::Device device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
+
+
 namespace rtg::trainer {
 
     struct TrainerOptions {
-        std::vector<std::string>& data_paths;
-        std::vector<std::string>& vocab_paths;
+        vector<string>& data_paths;
+        vector<string>& vocab_paths;
         int64_t epochs;
         int64_t batch_size;
     };
 
 
-
     struct Batch {
-        //std::vector<torch::Tensor>& fields;
-        //Batch(std::vector<torch::Tensor>& fields): fields(fields) {}
-
-        std::vector<std::vector<int>>& fields;
-        std::vector<std::string>& raw_fields;
-        Batch(std::vector<std::vector<int>>& fields, std::vector<std::string>& raw_fields): fields(fields), raw_fields(raw_fields) {}
+        vector<torch::Tensor>& fields;
+        vector<string>& raw_fields;
+        Batch(vector<torch::Tensor>& fields, vector<string>& raw_fields) : fields(fields), raw_fields(raw_fields) {}
 
         ~Batch() {}
     };
 
+    template <typename M, typename C>
     class Trainer {
     protected:
-        nn::AnyModule& model;
+        M model;
+        C criterion;
         optim::Optimizer& optimizer;
         optim::LRScheduler& scheduler;
-        nn::AnyModule& criterion;
         TrainerOptions& options;
-        std::vector<sp::SentencePieceProcessor*> vocabs;
+        vector<sp::SentencePieceProcessor*> vocabs;
 
     public:
 
-        static auto load_vocabs(TrainerOptions& options) -> std::vector<sp::SentencePieceProcessor*> {
+        static auto load_vocabs(TrainerOptions& options) -> vector<sp::SentencePieceProcessor*> {
             auto vocab_paths = options.vocab_paths;
             // SentencePieceProcessor is not copyable and movable, so we use pointers
-            std::vector<sp::SentencePieceProcessor*> sps;
+            vector<sp::SentencePieceProcessor*> spps;
             for (auto vocab_path : vocab_paths) {
                 spdlog::debug("loading vocab {}", vocab_path);
-                auto sp = new sp::SentencePieceProcessor();
+                auto spp = new sp::SentencePieceProcessor();
                 if (!fs::exists(vocab_path)) {
                     spdlog::error("Vocab file {} not found", vocab_path);
-                    throw std::runtime_error("Vocab file " + vocab_path + " not found");
+                    throw runtime_error("Vocab file " + vocab_path + " not found");
                 }
-                if (!sp->Load(vocab_path).ok()) {
-                    throw std::runtime_error("Unable to load vocab from " + vocab_path);
+                if (!spp->Load(vocab_path).ok()) {
+                    throw runtime_error("Unable to load vocab from " + vocab_path);
                 }
-                sps.push_back(sp);
+                spps.push_back(spp);
             }
-            /**
-             * C++ newbie question: sps is a local variable, but we return it by value.
-             * So, here the sps is copied? Isnt it a heavy operation?
-             *   Alternative: return as a pointer to obj on heap. But thats complicated because we need to manage the memory.
-             * Answer: Turns out, std::vector<> has move semantics. The sps is not copied, but moved. Move is cheap.
-            */
-            return sps;
+            return spps;
         }
 
-        Trainer(nn::AnyModule model,
+        Trainer(M model,
+            C criterion,
             optim::Optimizer& optimizer,
             optim::LRScheduler& scheduler,
-            nn::AnyModule criterion, 
-            TrainerOptions& options):
+            TrainerOptions& options) :
             model(model),
+            criterion(criterion),
             optimizer(optimizer),
             scheduler(scheduler),
-            criterion(criterion),
             options(options),
             vocabs(load_vocabs(options)) {
-                if (options.data_paths.size() == 0 || 
-                    options.data_paths.size() != options.vocab_paths.size() ||
-                    options.data_paths.size() != vocabs.size()) {
-                    throw std::runtime_error("Number of data files, vocab files, and vocab objects must be same and > 0");
-                }
+            if (options.data_paths.size() != 2 ||
+                options.data_paths.size() != options.vocab_paths.size() ||
+                options.data_paths.size() != vocabs.size()) {
+                    auto msg = fmt::format("Number of data files, vocab files, and vocab objects must be equal and 2 (i.e source, target). data_paths: {}, vocab_paths: {}, vocabs: {}", options.data_paths.size(), options.vocab_paths.size(), vocabs.size());
+                    throw runtime_error(msg);
             }
+            cerr << model << "\n";
+        }
 
         ~Trainer() {
-            for (auto vocab : vocabs) {
+            for (auto& vocab : vocabs) {
                 delete vocab;
             }
         }
 
-        auto get_train_data(TrainerOptions& options) -> std::generator<Batch> {
+        auto get_train_data(TrainerOptions& options) -> generator<Batch> {
             auto batch_size = options.batch_size;
             auto data_paths = options.data_paths;
-            std::vector<std::ifstream> files(data_paths.size());
+            vector<ifstream> files(data_paths.size());
             for (size_t i = 0; i < data_paths.size(); ++i) {
                 files[i].open(data_paths[i]);
                 if (!files[i]) {
-                    throw std::runtime_error("Failed to open file " + data_paths[i]);
+                    throw runtime_error("Failed to open file " + data_paths[i]);
                 }
             }
 
             while (true) {
-                std::vector<std::string> lines(data_paths.size());
-                std::vector<std::vector<int>> input_ids(data_paths.size());
+                vector<string> lines(data_paths.size());
+                vector<vector<int>> input_ids(data_paths.size());
+                
                 bool has_data = false;  // in all files
                 for (size_t i = 0; i < data_paths.size(); ++i) {
-                    if (std::getline(files[i], lines[i])) {
+                    if (getline(files[i], lines[i])) {
                         has_data = true;
                         vocabs[i]->Encode(lines[i], &input_ids[i]);
                     } else {
+                        spdlog::warn("file {} has no more data. Stopping", data_paths[i]);
+                        has_data = false;
                         break;
                     }
                 }
                 if (!has_data) {
                     break;
                 }
-                co_yield Batch(input_ids, lines);
+                vector<torch::Tensor> input_tensors(data_paths.size());
+                for (size_t i = 0; i < data_paths.size(); ++i) {
+                    input_tensors[i] = torch::tensor(input_ids[i], torch::kI64).view({ 1, -1 });
+                }
+                co_yield Batch(input_tensors, lines);
             }
 
             for (auto& file : files) {
@@ -130,12 +137,24 @@ namespace rtg::trainer {
         }
 
         void train(TrainerOptions& options) {
-            std::cout << "Trainer train\n";
+            cout << "Trainer train\n";
             int64_t step_num = 0;
             for (int64_t epoch = 0; epoch < options.epochs; epoch++) {
                 auto train_data = get_train_data(options);
                 for (auto batch : train_data) {
-                    std::cout << "epoch: " << epoch << " step: " << step_num << " IDs:" << batch.fields << " ||Raw:" << batch.raw_fields << "\n";
+                    cout << "epoch: " << epoch << " step: " << step_num << " IDs:" << batch.fields << " ||Raw:" << batch.raw_fields << "\n";
+                    auto src_ids = batch.fields[0];
+                    auto tgt_ids = batch.fields[1];
+                    auto src_key_padding_mask = src_ids == 0;
+                    auto tgt_key_padding_mask = tgt_ids == 0;
+                    auto output = model(src_ids, tgt_ids);
+                    auto loss = criterion(output, tgt_ids);
+                    cout << "loss: " << loss << "\n";
+
+                    optimizer.zero_grad();
+                    loss.backward();
+                    optimizer.step();
+                    scheduler.step();
                     step_num++;
                 }
             }

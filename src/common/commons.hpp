@@ -3,12 +3,21 @@
 
 #include <iostream>
 #include <filesystem>
+//#include <memory>
+#include <cassert>
 #include <signal.h>
 #include <spdlog/spdlog.h>
 #include <spdlog/fmt/bundled/format.h>
 
 namespace fs = std::filesystem;
 namespace LOG = spdlog;
+
+// using uptr = std::unique_ptr;
+// using sptr = std::shared_ptr;
+// using wptr = std::weak_ptr;
+
+#define assertm(exp, msg) assert(((void)msg, exp))
+
 
 /// @brief formatter for filesystem:path to work with spdlog
 // https://stackoverflow.com/a/69496952/1506477
