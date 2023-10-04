@@ -35,13 +35,11 @@ namespace rtg::nmt::transformer {
                 pe = pe.unsqueeze(0)
                 */
 
-
             auto pos = torch::arange(max_len, torch::kLong);         // [max_len]
             auto div_term = torch::exp(torch::arange(0, model_dim, 2) * (-std::log(10'000.0) / model_dim));
             positions.index_put_({ Slice(), Slice(), Slice(0, None, 2) }, torch::sin(pos.unsqueeze(1) * div_term));
             positions.index_put_({ Slice(), Slice(), Slice(1, None, 2) }, torch::cos(pos.unsqueeze(1) * div_term));
             //positions = positions.unsqueeze(0);                           // [1, max_len, model_dim]
-
         }
 
         auto forward(torch::Tensor& x) -> torch::Tensor {
@@ -106,15 +104,20 @@ namespace rtg::nmt::transformer {
             return nn::Transformer(model_config);
         }
 
-        auto forward(torch::Tensor& src, torch::Tensor& tgt) -> torch::Tensor {
+        auto forward(torch::Tensor& src, torch::Tensor& tgt, torch::Tensor& src_mask, torch::Tensor& tgt_mask) -> torch::Tensor {
             // src: [batch_size, src_len]
             // tgt: [batch_size, tgt_len]
             // return: [batch_size, tgt_len, tgt_vocab_size]
-            auto src_mask = (src == 0); // [batch_size, src_len]
-            auto tgt_mask = (tgt == 0); // [batch_size, tgt_len]
+
+            std::cout << "src: " << src.sizes() << std::endl;
+            std::cout << "tgt: " << tgt.sizes() << std::endl;
             auto src_embedded = src_embed(src); // [batch_size, src_len, model_dim]
             auto tgt_embedded = tgt_embed(tgt); // [batch_size, tgt_len, model_dim]
-            auto memory = transformer->forward(src_embedded, tgt_embedded, src_mask, tgt_mask);
+            std::cout << "src_embedded: " << src_embedded.sizes() << std::endl;
+            std::cout << "tgt_embedded: " << tgt_embedded.sizes() << std::endl;
+            std::cout << "src_mask: " << src_mask.sizes() << std::endl;
+            std::cout << "tgt_mask: " << tgt_mask.sizes() << std::endl;
+            auto memory = transformer(src_embedded, tgt_embedded, src_mask, tgt_mask);
             return memory;
         }
     };

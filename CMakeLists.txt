@@ -25,14 +25,21 @@ include_directories(
     "${CMAKE_SOURCE_DIR}/libs/libtorch/include/torch/csrc/api/include"
     "${CMAKE_SOURCE_DIR}/libs/sentencepiece/src"
     "${CMAKE_SOURCE_DIR}/libs/spdlog/include"
-    "${CMAKE_SOURCE_DIR}/libs/tomlplusplus/include"
+    "${CMAKE_SOURCE_DIR}/libs/yaml-cpp/include"
     )
 
+# "${CMAKE_SOURCE_DIR}/libs/tomlplusplus/include"
 
-# Add the SentencePiece library
+
+### SentencePiece library
 add_subdirectory(${CMAKE_SOURCE_DIR}/libs/sentencepiece)
 set(EXT_LIBS ${EXT_LIBS} sentencepiece sentencepiece_train)
-add_subdirectory(${CMAKE_SOURCE_DIR}/libs/backward-cpp)
 
+### yaml-cpp
+add_subdirectory(${CMAKE_SOURCE_DIR}/libs/yaml-cpp)
+set(EXT_LIBS ${EXT_LIBS} yaml-cpp)
+
+###
+add_subdirectory(${CMAKE_SOURCE_DIR}/libs/backward-cpp)
 
 add_subdirectory(src)

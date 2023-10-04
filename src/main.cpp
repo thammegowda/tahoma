@@ -43,7 +43,7 @@ namespace rtg {
 
 
 int main(int argc, char* argv[]) {
-
+    using namespace rtg;
     int _code = global_setup();
     if (_code != 0){
         return _code;
@@ -72,24 +72,23 @@ int main(int argc, char* argv[]) {
         throw std::runtime_error("config file" + std::string(config_file) + "not found");
     }
 
-    auto config = rtg::config::Config(config_file);
-    auto model = rtg::nmt::transformer::TransformerNMT(config);
+    auto config = config::Config(config_file);
+    auto model = nmt::transformer::TransformerNMT(config);
 
     auto criterion = nn::CrossEntropyLoss();
     auto optimizer = optim::Adam(model->parameters(), optim::AdamOptions(0.0001));
     auto scheduler = optim::StepLR(optimizer, 1.0, 0.95);
 
-    auto data_paths = config["trainer"]["data"].as<std::vector<std::string>>();
-    auto vocab_paths = config["schema"]["vocabs"].as<std::vector<std::string>>();
-
-    rtg::trainer::TrainerOptions options {
-        .data_paths = data_paths,
-        .vocab_paths = vocab_paths,
-        .epochs = 10,
-        .batch_size = 32
+    auto trainer_conf = config["trainer"];
+    trainer::TrainerOptions options {
+        .data_paths = trainer_conf["data"].as<std::vector<std::string>>(),
+        .vocab_paths = config["schema"]["vocabs"].as<std::vector<std::string>>(),
+        .epochs = trainer_conf["epochs"].as<int>(),
+        .batch_size = trainer_conf["batch_size"].as<int>(),
     };
 
-    auto trainer = rtg::trainer::Trainer<rtg::nmt::transformer::TransformerNMT, nn::CrossEntropyLoss>(model, criterion, optimizer, scheduler, options);
+    auto trainer = trainer::Trainer<nmt::transformer::TransformerNMT, nn::CrossEntropyLoss>(
+        model, criterion, optimizer, scheduler, options);
     trainer.train(options);
     spdlog::info("main finished..");
     return 0;
