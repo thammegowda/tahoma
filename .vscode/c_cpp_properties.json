@@ -11,7 +11,6 @@
             "defines": [],
             "intelliSenseMode": "linux-gcc-x64",
             "configurationProvider": "ms-vscode.cmake-tools",
-            "compilerPath": "/usr/bin/g++-12",
             "cppStandard": "c++23",
             "cStandard": "c23"
         }
