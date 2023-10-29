@@ -1,5 +1,6 @@
 #include <iostream>
-#include<tuple>
+#include <tuple>
+#include <assert.h>
 #include <torch/torch.h>
 //#include <toml++/toml.h>
 #include "../common/config.hpp"
@@ -17,7 +18,6 @@ namespace rtg::nmt::transformer {
         nn::Embedding embedding;
         torch::Tensor positions;
         nn::Dropout dropout;
-
 
         PositionEmbeddingImpl(int vocab_size, int model_dim, double dropout = 0.1, int max_len = 5000) :
             embedding{ register_module("embedding", nn::Embedding(nn::EmbeddingOptions(vocab_size, model_dim))) },
@@ -64,7 +64,11 @@ namespace rtg::nmt::transformer {
         nn::Dropout dropout2;
 
         EncoderLayerImpl(int model_dim, int nhead, double dropout = 0.1) :
-            self_attn{ register_module("self_attn", nn::MultiheadAttention(nn::MultiheadAttentionOptions(model_dim, nhead).dropout(dropout))) },
+           
+            self_attn{
+                (assert(model_dim > 0), assert(nhead > 0), assert(model_dim % nhead == 0),
+                register_module("self_attn", nn::MultiheadAttention(nn::MultiheadAttentionOptions(model_dim, nhead).dropout(dropout))))
+                },
             fc1{ register_module("fc1", nn::Linear(nn::LinearOptions(model_dim, model_dim * 4))) },
             fc2{ register_module("fc2", nn::Linear(nn::LinearOptions(model_dim * 4, model_dim))) },
             norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
@@ -94,23 +98,28 @@ namespace rtg::nmt::transformer {
 
 
     struct EncoderImpl : public nn::Module {
-        PositionEmbedding position_embedding;
+        PositionEmbedding position_embedding = nullptr;
         nn::LayerNorm norm1;
         nn::Dropout dropout;
-        nn::ModuleList layers;
         int num_layers;
+        nn::ModuleList layers;
+
+        static nn::ModuleList make_layers(int model_dim, int nhead, int num_layers, double dropout = 0.1) {
+            auto layers = nn::ModuleList(); 
+            for (int i = 0; i < num_layers; ++i) {
+                layers->push_back(EncoderLayer(model_dim, nhead, dropout));
+            }
+            return layers;
+        }
 
         EncoderImpl(int vocab_size, int model_dim, int nhead, int num_layers, double dropout = 0.1) :
             //embedding{ register_module("embedding", nn::Embedding(nn::EmbeddingOptions(vocab_size, model_dim))) },
             position_embedding{ register_module("position_embedding", PositionEmbedding(vocab_size, model_dim, dropout)) },
             norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
             dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
-            layers{ register_module("layers", nn::ModuleList()) },
+            layers{ register_module("layers", make_layers(model_dim, nhead, num_layers, dropout))},
             num_layers{ num_layers }
         {
-            for (int i = 0; i < num_layers; ++i) {
-                layers->push_back(EncoderLayer(model_dim, nhead, dropout));
-            }
         }
 
         auto forward(torch::Tensor& src, torch::Tensor& src_mask) -> torch::Tensor {
@@ -144,21 +153,32 @@ namespace rtg::nmt::transformer {
         nn::LayerNorm norm1;
         nn::LayerNorm norm2;
         nn::LayerNorm norm3;
+
         nn::Dropout dropout1;
         nn::Dropout dropout2;
         nn::Dropout dropout3;
 
-        DecoderLayerImpl(int vocab_size, int model_dim, int nhead, double dropout = 0.1) :
-            self_attn{ register_module("self_attn", nn::MultiheadAttention(nn::MultiheadAttentionOptions(model_dim, nhead).dropout(dropout))) },
-            src_attn{ register_module("src_attn", nn::MultiheadAttention(nn::MultiheadAttentionOptions(model_dim, nhead).dropout(dropout))) },
-            fc1{ register_module("fc1", nn::Linear(nn::LinearOptions(model_dim, model_dim * 4))) },
-            fc2{ register_module("fc2", nn::Linear(nn::LinearOptions(model_dim * 4, model_dim))) },
-            norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
-            norm2{ register_module("norm2", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
-            norm3{ register_module("norm3", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
-            dropout1{ register_module("dropout1", nn::Dropout(nn::DropoutOptions(dropout))) },
-            dropout2{ register_module("dropout2", nn::Dropout(nn::DropoutOptions(dropout))) },
-            dropout3{ register_module("dropout3", nn::Dropout(nn::DropoutOptions(dropout))) }
+
+        DecoderLayerImpl(int model_dim, int nhead, double dropout = 0.1) :
+            self_attn {( 
+                assert(model_dim > 0), 
+                assert(nhead > 0),
+                assert(model_dim % nhead == 0), 
+                register_module("self_attn",
+                    nn::MultiheadAttention(nn::MultiheadAttentionOptions(model_dim, nhead).dropout(dropout)))
+            )},
+            src_attn {
+                register_module("src_attn", 
+                    nn::MultiheadAttention(nn::MultiheadAttentionOptions(model_dim, nhead).dropout(dropout))) 
+            },
+            fc1 { register_module("fc1", nn::Linear(nn::LinearOptions(model_dim, model_dim * 4))) },
+            fc2 { register_module("fc2", nn::Linear(nn::LinearOptions(model_dim * 4, model_dim))) },
+            norm1 { register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            norm2 { register_module("norm2", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            norm3 { register_module("norm3", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            dropout1 { register_module("dropout1", nn::Dropout(nn::DropoutOptions(dropout))) },
+            dropout2 { register_module("dropout2", nn::Dropout(nn::DropoutOptions(dropout))) },
+            dropout3 { register_module("dropout3", nn::Dropout(nn::DropoutOptions(dropout))) }
         {
         }
 
@@ -178,7 +198,6 @@ namespace rtg::nmt::transformer {
             x = x + dropout2(x2);
             x = norm2(x);
 
-
             x2 = fc2(F::relu(fc1(x))); // [batch_size, tgt_len, model_dim]
             x = x + dropout3(x2);
             x = norm3(x);
@@ -191,16 +210,19 @@ namespace rtg::nmt::transformer {
         PositionEmbedding position_embedding;
         nn::LayerNorm norm1;
         nn::Dropout dropout;
-        nn::ModuleList layers;
         int num_layers;
+        nn::ModuleList layers;
 
         DecoderImpl(int vocab_size, int model_dim, int nhead, int num_layers, double dropout = 0.1) :
-            position_embedding{ register_module("position_embedding", PositionEmbedding(vocab_size, model_dim, dropout)) },
+            position_embedding{( assert(vocab_size > 0), assert(model_dim > 0),
+                register_module("position_embedding", PositionEmbedding(vocab_size, model_dim, dropout)) 
+                )},
             norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
             dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
             layers{ register_module("layers", nn::ModuleList()) },
             num_layers{ num_layers }
         {
+            assert(num_layers > 0);
             for (int i = 0; i < num_layers; ++i) {
                 layers->push_back(DecoderLayer(model_dim, nhead, dropout));
             }
@@ -231,19 +253,23 @@ namespace rtg::nmt::transformer {
         Encoder encoder;
         Decoder decoder;
 
-        TransformerNMTImpl(const rtg::config::Config& config)
-            : encoder{ register_module("encoder", Encoder(
+        TransformerNMTImpl(const rtg::config::Config& config):
+            encoder {
+                register_module("encoder", Encoder(
                 config["model"]["src_vocab_size"].as<int>(),
                 config["model"]["model_dim"].as<int>(),
                 config["model"]["attn_head"].as<int>(),
                 config["model"]["encoder_layers"].as<int>(),
-                config["model"]["dropout"].as<double>())) },
-            decoder{ register_module("decoder", Decoder(
+                config["model"]["dropout"].as<double>()))
+            },
+            decoder {
+                register_module("decoder",  Decoder(
                 config["model"]["tgt_vocab_size"].as<int>(),
                 config["model"]["model_dim"].as<int>(),
                 config["model"]["attn_head"].as<int>(),
                 config["model"]["decoder_layers"].as<int>(),
-                config["model"]["dropout"].as<double>())) }
+                config["model"]["dropout"].as<double>()))
+            }
         {
         }
 
@@ -261,6 +287,5 @@ namespace rtg::nmt::transformer {
         }
     };
     TORCH_MODULE(TransformerNMT);
-
 
 }

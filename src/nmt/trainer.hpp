@@ -30,7 +30,6 @@ namespace rtg::trainer {
         int32_t batch_size;
     };
 
-
     struct Example {
 
         int64_t id;
@@ -122,7 +121,7 @@ namespace rtg::trainer {
         vector<std::shared_ptr<sp::SentencePieceProcessor>> vocabs;
 
     public:
-
+        
         static auto load_vocabs(TrainerOptions& options) -> vector<std::shared_ptr<sp::SentencePieceProcessor>> {
             auto vocab_paths = options.vocab_paths;
             // SentencePieceProcessor is not copyable and movable, so we use pointers
