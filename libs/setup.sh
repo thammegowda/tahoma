@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -eu
 MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $MYDIR
 
@@ -18,5 +18,14 @@ libtorch_url=${cpu_url}
 if [[ -f libtorch/lib/libtorch.so ]]; then
     echo "libtorch already exists"
 else
-    wget -O libtorch.cpu.zip $libtorch_url && unzip libtorch.cpu.zip && rm libtorch.cpu.zip
+    for tool in wget unzip; do
+        if ! command -v $tool &> /dev/null; then
+            echo "$tool could not be found. Please install and rerun."
+            exit
+        fi
+    done
+
+    wget -O libtorch.cpu.zip $libtorch_url
+    unzip libtorch.cpu.zip
+    rm libtorch.cpu.zip
 fi

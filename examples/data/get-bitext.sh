@@ -2,9 +2,13 @@
 set -euo pipefail
 
 mydir=$(dirname $0)
+root=$(realpath $mydir/../..)
 
 # Download the data
 tools=(mtdata spm_train)
+
+# add spm_train to path
+export PATH=$PATH:$root/build/libs/sentencepiece/src 
 
 for tool in ${tools[@]}; do
     if ! command -v $tool &> /dev/null; then
