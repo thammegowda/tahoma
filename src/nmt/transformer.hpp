@@ -1,4 +1,5 @@
 #include <iostream>
+#include<tuple>
 #include <torch/torch.h>
 //#include <toml++/toml.h>
 #include "../common/config.hpp"
@@ -11,8 +12,6 @@ using namespace torch::indexing;
 
 
 namespace rtg::nmt::transformer {
-
-
 
     struct PositionEmbeddingImpl : nn::Module {
         nn::Embedding embedding;
@@ -55,53 +54,197 @@ namespace rtg::nmt::transformer {
     };
     TORCH_MODULE(PositionEmbedding);
 
-    struct TransformerNMTImpl : public nn::Module {
-        PositionEmbedding src_embed;
-        PositionEmbedding tgt_embed;
-        nn::Transformer transformer;
+    struct EncoderLayerImpl : public nn::Module {
+        nn::MultiheadAttention self_attn;
+        nn::Linear fc1;
+        nn::Linear fc2;
+        nn::LayerNorm norm1;
+        nn::LayerNorm norm2;
+        nn::Dropout dropout1;
+        nn::Dropout dropout2;
 
-        TransformerNMTImpl(const rtg::config::Config& config)
-            :src_embed{ register_module("src_embed", PositionEmbedding(
-                    config["model"]["src_vocab_size"].as<int>(),
-                    config["model"]["model_dim"].as<int>(),
-                    config["model"]["dropout"].as<double>())) },
-            tgt_embed{ register_module("tgt_embed", PositionEmbedding(
-               config["model"]["tgt_vocab_size"].as<int>(),
-               config["model"]["model_dim"].as<int>(),
-               config["model"]["dropout"].as<double>())) },
-            transformer{ register_module("transformer", init_model(config)) }
+        EncoderLayerImpl(int model_dim, int nhead, double dropout = 0.1) :
+            self_attn{ register_module("self_attn", nn::MultiheadAttention(nn::MultiheadAttentionOptions(model_dim, nhead).dropout(dropout))) },
+            fc1{ register_module("fc1", nn::Linear(nn::LinearOptions(model_dim, model_dim * 4))) },
+            fc2{ register_module("fc2", nn::Linear(nn::LinearOptions(model_dim * 4, model_dim))) },
+            norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            norm2{ register_module("norm2", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            dropout1{ register_module("dropout1", nn::Dropout(nn::DropoutOptions(dropout))) },
+            dropout2{ register_module("dropout2", nn::Dropout(nn::DropoutOptions(dropout))) }
         {
         }
 
-        static auto init_model(config::Config config) -> nn::Transformer {
-            if (!config["model"]) {
-                spdlog::error("[model] config block not found");
-                throw std::runtime_error("[model] config block not found");
-            }
-            auto model_conf = config["model"];
+        auto forward(torch::Tensor& src, torch::Tensor& src_mask) -> torch::Tensor {
+            // src: [batch_size, src_len, model_dim]
+            // src_mask: [batch_size, 1, src_len]
+            // return: [batch_size, src_len, model_dim]
 
-            // check if model_dim, nhead, num_encoder_layers, num_decoder_layers are present
-            auto required_keys = { "model_dim", "attn_head", "encoder_layers", "decoder_layers", "dropout", "ffn_dim" };
-            for (auto& key : required_keys) {
-                if (!model_conf[key]) {
-                    spdlog::error("model config: {} not found", key);
-                    throw std::runtime_error("model config: " + std::string(key) + " not found");
-                }
-            }
-            // value<T>() returns optional<T>, and then value() returns T
-            auto d_model = model_conf["model_dim"].as<int64_t>(512);
-            auto nhead = model_conf["attn_head"].as<int64_t>(8);
-            auto num_encoder_layers = model_conf["encoder_layers"].as<int64_t>(6);
-            auto num_decoder_layers = model_conf["decoder_layers"].as<int64_t>(6);
-            auto dropout = model_conf["dropout"].as<double>(0.1);
-            auto ffn_dim = model_conf["ffn_dim"].as<double>(d_model * 4);
+            auto src2 = std::get<0>(
+                self_attn(src, src, src, src_mask)); // [batch_size, src_len, model_dim]
+            src = src + dropout1(src2);
+            src = norm1(src);
 
-            auto model_config = nn::TransformerOptions(d_model, nhead)
-                .num_encoder_layers(num_encoder_layers)
-                .dim_feedforward(ffn_dim)
-                .dropout(dropout)
-                .num_decoder_layers(num_decoder_layers);
-            return nn::Transformer(model_config);
+            src2 = fc2(F::relu(fc1(src))); // [batch_size, src_len, model_dim]
+            src = src + dropout2(src2);
+            src = norm2(src);
+            return src;
+        }
+    };
+    TORCH_MODULE(EncoderLayer);
+
+
+    struct EncoderImpl : public nn::Module {
+        PositionEmbedding position_embedding;
+        nn::LayerNorm norm1;
+        nn::Dropout dropout;
+        nn::ModuleList layers;
+        int num_layers;
+
+        EncoderImpl(int vocab_size, int model_dim, int nhead, int num_layers, double dropout = 0.1) :
+            //embedding{ register_module("embedding", nn::Embedding(nn::EmbeddingOptions(vocab_size, model_dim))) },
+            position_embedding{ register_module("position_embedding", PositionEmbedding(vocab_size, model_dim, dropout)) },
+            norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
+            layers{ register_module("layers", nn::ModuleList()) },
+            num_layers{ num_layers }
+        {
+            for (int i = 0; i < num_layers; ++i) {
+                layers->push_back(EncoderLayer(model_dim, nhead, dropout));
+            }
+        }
+
+        auto forward(torch::Tensor& src, torch::Tensor& src_mask) -> torch::Tensor {
+            // src: [batch_size, src_len]
+            // src_mask: [batch_size, 1, src_len]
+            // return: [batch_size, src_len, model_dim]
+
+            auto x = src;
+            //auto src_embedded = embedding(src); // [batch_size, src_len, model_dim]
+            x = position_embedding(x); // [batch_size, src_len, model_dim]
+            x = dropout(x);
+            x = norm1(x);
+            
+            for (int i = 0; i < num_layers; ++i) {
+                auto layer = layers->at<EncoderLayerImpl>(i);
+                x = layer.forward(x, src_mask);
+            }
+            return x;
+        }
+    };
+    TORCH_MODULE(Encoder);
+
+
+    struct DecoderLayerImpl : public nn::Module {
+
+        nn::MultiheadAttention self_attn;
+        nn::MultiheadAttention src_attn;
+        nn::Linear fc1;
+        nn::Linear fc2;
+
+        nn::LayerNorm norm1;
+        nn::LayerNorm norm2;
+        nn::LayerNorm norm3;
+        nn::Dropout dropout1;
+        nn::Dropout dropout2;
+        nn::Dropout dropout3;
+
+        DecoderLayerImpl(int vocab_size, int model_dim, int nhead, double dropout = 0.1) :
+            self_attn{ register_module("self_attn", nn::MultiheadAttention(nn::MultiheadAttentionOptions(model_dim, nhead).dropout(dropout))) },
+            src_attn{ register_module("src_attn", nn::MultiheadAttention(nn::MultiheadAttentionOptions(model_dim, nhead).dropout(dropout))) },
+            fc1{ register_module("fc1", nn::Linear(nn::LinearOptions(model_dim, model_dim * 4))) },
+            fc2{ register_module("fc2", nn::Linear(nn::LinearOptions(model_dim * 4, model_dim))) },
+            norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            norm2{ register_module("norm2", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            norm3{ register_module("norm3", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            dropout1{ register_module("dropout1", nn::Dropout(nn::DropoutOptions(dropout))) },
+            dropout2{ register_module("dropout2", nn::Dropout(nn::DropoutOptions(dropout))) },
+            dropout3{ register_module("dropout3", nn::Dropout(nn::DropoutOptions(dropout))) }
+        {
+        }
+
+        auto forward(torch::Tensor& tgt, torch::Tensor& memory, torch::Tensor& tgt_mask, torch::Tensor& memory_mask) -> torch::Tensor {
+            // tgt: [batch_size, tgt_len, model_dim]
+            // memory: [batch_size, src_len, model_dim]
+            // tgt_mask: [batch_size, 1, tgt_len]
+            // memory_mask: [batch_size, 1, src_len]
+            // return
+
+            auto x = tgt;
+            auto x2 = std::get<0>(self_attn(x, x, x, tgt_mask)); // [batch_size, tgt_len, model_dim]
+            x = x + dropout1(x2);
+            x = norm1(x);
+
+            x2 = std::get<0>(src_attn(x, memory, memory, memory_mask)); // [batch_size, tgt_len, model_dim]
+            x = x + dropout2(x2);
+            x = norm2(x);
+
+
+            x2 = fc2(F::relu(fc1(x))); // [batch_size, tgt_len, model_dim]
+            x = x + dropout3(x2);
+            x = norm3(x);
+            return x;
+        }
+    };
+    TORCH_MODULE(DecoderLayer);
+
+    struct DecoderImpl: public nn::Module {
+        PositionEmbedding position_embedding;
+        nn::LayerNorm norm1;
+        nn::Dropout dropout;
+        nn::ModuleList layers;
+        int num_layers;
+
+        DecoderImpl(int vocab_size, int model_dim, int nhead, int num_layers, double dropout = 0.1) :
+            position_embedding{ register_module("position_embedding", PositionEmbedding(vocab_size, model_dim, dropout)) },
+            norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
+            layers{ register_module("layers", nn::ModuleList()) },
+            num_layers{ num_layers }
+        {
+            for (int i = 0; i < num_layers; ++i) {
+                layers->push_back(DecoderLayer(model_dim, nhead, dropout));
+            }
+        }
+
+        auto forward(torch::Tensor& tgt, torch::Tensor& memory, torch::Tensor& tgt_mask, torch::Tensor& memory_mask) -> torch::Tensor {
+            // tgt: [batch_size, tgt_len]
+            // memory: [batch_size, src_len, model_dim]
+            // tgt_mask: [batch_size, 1, tgt_len]
+            // memory_mask: [batch_size, 1, src_len]
+            // return: [batch_size, tgt_len, model_dim]
+
+            auto x = tgt;
+            x = position_embedding(x); // [batch_size, tgt_len, model_dim]
+            x = dropout(x);
+            x = norm1(x);
+
+            for (int i = 0; i < num_layers; ++i) {
+                x = layers->at<DecoderLayerImpl>(i).forward(x, memory, tgt_mask, memory_mask);
+            }
+            return x;
+        }
+    };
+    TORCH_MODULE(Decoder);
+
+
+    struct TransformerNMTImpl : public nn::Module {
+        Encoder encoder;
+        Decoder decoder;
+
+        TransformerNMTImpl(const rtg::config::Config& config)
+            : encoder{ register_module("encoder", Encoder(
+                config["model"]["src_vocab_size"].as<int>(),
+                config["model"]["model_dim"].as<int>(),
+                config["model"]["attn_head"].as<int>(),
+                config["model"]["encoder_layers"].as<int>(),
+                config["model"]["dropout"].as<double>())) },
+            decoder{ register_module("decoder", Decoder(
+                config["model"]["tgt_vocab_size"].as<int>(),
+                config["model"]["model_dim"].as<int>(),
+                config["model"]["attn_head"].as<int>(),
+                config["model"]["decoder_layers"].as<int>(),
+                config["model"]["dropout"].as<double>())) }
+        {
         }
 
         auto forward(torch::Tensor& src, torch::Tensor& tgt, torch::Tensor& src_mask, torch::Tensor& tgt_mask) -> torch::Tensor {
@@ -111,14 +254,10 @@ namespace rtg::nmt::transformer {
 
             std::cout << "src: " << src.sizes() << std::endl;
             std::cout << "tgt: " << tgt.sizes() << std::endl;
-            auto src_embedded = src_embed(src); // [batch_size, src_len, model_dim]
-            auto tgt_embedded = tgt_embed(tgt); // [batch_size, tgt_len, model_dim]
-            std::cout << "src_embedded: " << src_embedded.sizes() << std::endl;
-            std::cout << "tgt_embedded: " << tgt_embedded.sizes() << std::endl;
-            std::cout << "src_mask: " << src_mask.sizes() << std::endl;
-            std::cout << "tgt_mask: " << tgt_mask.sizes() << std::endl;
-            auto memory = transformer(src_embedded, tgt_embedded, src_mask, tgt_mask);
-            return memory;
+
+            auto memory = encoder(src, src_mask); // [batch_size, src_len, model_dim]
+            auto output = decoder(tgt, memory, tgt_mask, src_mask); // [batch_size, tgt_len, model_dim]
+            return output;
         }
     };
     TORCH_MODULE(TransformerNMT);
