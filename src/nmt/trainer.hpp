@@ -28,28 +28,21 @@ using namespace rtg;
 
 namespace rtg::train {
 
-    struct TrainerOptions {
-        vector<string> data_paths;
-        vector<string> vocab_paths;
-        int32_t epochs;
-        int32_t batch_size;
-    };
-
-
     template <typename M, typename C>
     class Trainer {
     protected:
+        config::Config config;
         M model;
         C criterion;
-        optim::Optimizer& optimizer;
-        optim::LRScheduler& scheduler;
-        TrainerOptions& options;
+        std::shared_ptr<optim::Optimizer> optimizer;
+        std::shared_ptr<optim::LRScheduler> scheduler;
         vector<std::shared_ptr<sp::SentencePieceProcessor>> vocabs;
 
     public:
         
-        static auto load_vocabs(TrainerOptions& options) -> vector<std::shared_ptr<sp::SentencePieceProcessor>> {
-            auto vocab_paths = options.vocab_paths;
+        static auto load_vocabs(const config::Config& config) -> vector<std::shared_ptr<sp::SentencePieceProcessor>> {
+            auto vocab_paths = config["schema"]["vocabs"].as<std::vector<std::string>>();
+            assert(!vocab_paths.empty()); // expected atleast one vocabulary
             // SentencePieceProcessor is not copyable and movable, so we use pointers
             vector<std::shared_ptr<sp::SentencePieceProcessor>> spps;
             for (auto vocab_path : vocab_paths) {
@@ -67,28 +60,35 @@ namespace rtg::train {
             return spps;
         }
 
-        Trainer(M model,
-            C criterion,
-            optim::Optimizer& optimizer,
-            optim::LRScheduler& scheduler,
-            TrainerOptions& options) :
-            model(model),
-            criterion(criterion),
-            optimizer(optimizer),
-            scheduler(scheduler),
-            options(options),
-            vocabs(load_vocabs(options)) {
-            if (options.data_paths.size() != 2 ||
-                options.data_paths.size() != options.vocab_paths.size() ||
-                options.data_paths.size() != vocabs.size()) {
-                    auto msg = fmt::format("Number of data files, vocab files, \
-                     and vocab objects must be equal and 2 (i.e source, target). \
-                     data_paths: {}, vocab_paths: {}, vocabs: {}",
-                     options.data_paths.size(), options.vocab_paths.size(), vocabs.size());
-                    throw runtime_error(msg);
+        static auto init_model(config::Config& config) -> M {
+            auto model_type = config["model"]["type"].as<string>();
+            if (model_type == "transformer") {
+                return nmt::transformer::TransformerNMT(config);
+            } else {
+                throw runtime_error("Unknown model type " + model_type);
             }
-            cerr << model << "\n";
         }
+
+        static auto init_criterion(const config::Config& config) -> C {
+            return nn::CrossEntropyLoss();
+        }
+
+        static auto init_optimizer(const config::Config& config, M model) -> std::shared_ptr<optim::Optimizer> {
+            return std::make_shared<optim::Adam>(model->parameters(), optim::AdamOptions(0.0001));
+        }
+
+        static auto init_scheduler(const config::Config& config, optim::Optimizer& optimizer) -> std::shared_ptr<optim::LRScheduler> {
+            return std::make_shared<optim::StepLR>(optimizer, 1.0, 0.95);
+        }
+
+        Trainer(config::Config& conf):
+            config {conf},
+            model {init_model(config)},
+            criterion {init_criterion(config)},
+            optimizer {init_optimizer(config, model)},
+            scheduler {init_scheduler(config, *optimizer)},
+            vocabs {load_vocabs(config)}
+        {}
 
         ~Trainer() {
             for (auto& vocab : vocabs) {
@@ -96,9 +96,10 @@ namespace rtg::train {
             }
         }
 
-        auto get_train_data(TrainerOptions& options) -> generator<data::Batch> {
-            auto batch_size = options.batch_size;
-            auto data_paths = options.data_paths;
+        auto get_train_data() -> generator<data::Batch> {
+            
+            auto batch_size = config["trainer"]["batch_size"].as<int>();
+            auto data_paths = config["trainer"]["data"].as<vector<string>>();
             LOG::info("Loading data from {}", fmt::join(data_paths, ","));
             assert (batch_size > 0);
             const int32_t num_fields = data_paths.size();
@@ -126,6 +127,7 @@ namespace rtg::train {
                     }
                 }
                 if (has_ended) { break; }
+
                 bool skip = false;
                 for (size_t i = 0; i < num_fields; ++i) {
                     auto ids = vocabs[i]->EncodeAsIds(fields[i]);
@@ -136,6 +138,7 @@ namespace rtg::train {
                     spdlog::warn("Skipping empty record {}", rec_num);
                     continue;
                  }
+
                 auto ex = data::Example(rec_num, fields, field_ids);
                 buffer.push_back(ex);
                 rec_num++;
@@ -148,17 +151,19 @@ namespace rtg::train {
             if (!buffer.empty()) {
                 co_yield data::Batch::from_buffer(buffer);
             }
-
+            // I wish there was a finally{} block to guarantee file closure :(
             for (auto& file : files) {
                 file.close();
             }
         }
 
-        void train(TrainerOptions& options) {
-            spdlog::info("Training started; total epochs = {}", options.epochs);
+        void train() {
+            size_t num_epochs = config["trainer"]["epochs"].as<int>();
+
+            spdlog::info("Training started; total epochs = {}", num_epochs);
             int64_t step_num = 0;
-            for (int32_t epoch = 0; epoch < options.epochs; epoch++) {
-                auto train_data = get_train_data(options);
+            for (int32_t epoch = 0; epoch < num_epochs; epoch++) {
+                auto train_data = get_train_data();
                 for (auto batch : train_data) {
                     cout << "epoch: " << epoch << "; step: " << step_num 
                         << "; src: " << batch.fields[0].sizes() << " tgt: " << batch.fields[1].sizes() << "\n";
@@ -181,10 +186,10 @@ namespace rtg::train {
                     auto loss = criterion(output_flat, tgt_ids_flat); // TODO: exclude padding tokens
                     cout << "loss: " << loss << "\n";
 
-                    optimizer.zero_grad();
+                    optimizer->zero_grad();
                     loss.backward();
-                    optimizer.step();
-                    scheduler.step();
+                    optimizer->step();
+                    scheduler->step();
                     step_num++;
 
                     if (step_num >  20) {
@@ -236,33 +241,18 @@ int main(int argc, char* argv[]) {
     }
     if (!config_file_arg.empty()){
         spdlog::info("copying config file {} -> {}", config_file_arg, config_file);
-        fs::copy(fs::path(config_file_arg), config_file,
-                    fs::copy_options::overwrite_existing);
+        fs::copy(fs::path(config_file_arg), config_file, fs::copy_options::overwrite_existing);
     }
+
     if (!fs::exists(config_file)) {
         spdlog::error("config file {} not found", config_file);
         throw std::runtime_error("config file" + std::string(config_file) + "not found");
     }
 
     auto config = rtg::config::Config(config_file);
-    auto model = nmt::transformer::TransformerNMT(config);
-
-
-    auto criterion = nn::CrossEntropyLoss();
-    auto optimizer = optim::Adam(model->parameters(), optim::AdamOptions(0.0001));
-    auto scheduler = optim::StepLR(optimizer, 1.0, 0.95);
-
-    auto trainer_conf = config["trainer"];
-    train::TrainerOptions options {
-        .data_paths = trainer_conf["data"].as<std::vector<std::string>>(),
-        .vocab_paths = config["schema"]["vocabs"].as<std::vector<std::string>>(),
-        .epochs = trainer_conf["epochs"].as<int>(),
-        .batch_size = trainer_conf["batch_size"].as<int>(),
-    };
-
-    auto trainer = train::Trainer<nmt::transformer::TransformerNMT, nn::CrossEntropyLoss>(
-        model, criterion, optimizer, scheduler, options);
-    trainer.train(options);
+    std::cout << "Config:\n\n" << config << "\n";
+    auto trainer = train::Trainer<nmt::transformer::TransformerNMT, nn::CrossEntropyLoss>(config);
+    trainer.train();
     spdlog::info("main finished..");
     return 0;
 }

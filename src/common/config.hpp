@@ -20,7 +20,14 @@ namespace rtg::config {
                 validate_config(*this);
             }
         }
-
+        // copy and move
+        Config(const Config& other) = default;
+        Config(Config&& other) = default;
+        Config& operator=(const Config& other) = default;
+        Config& operator=(Config&& other) = default;
+        // destructor
+        ~Config() = default;
+        
         static auto validate_config(const YAML::Node& config) -> void {
             std::vector<std::string> expected_keys = { "model", "schema", "optimizer", "trainer", "validator" };
             for (auto key : expected_keys) {

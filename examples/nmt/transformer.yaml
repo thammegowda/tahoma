@@ -1,5 +1,5 @@
 model:
-  name: transformer
+  type: transformer
   model_dim: 512
   src_vocab_size: 8000
   tgt_vocab_size: 8000

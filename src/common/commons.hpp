@@ -3,7 +3,7 @@
 
 #include <iostream>
 #include <filesystem>
-//#include <memory>
+#include <memory>
 #include <cassert>
 #include <signal.h>
 #include <spdlog/spdlog.h>
@@ -12,8 +12,23 @@
 namespace fs = std::filesystem;
 namespace LOG = spdlog;
 
-// using uptr = std::unique_ptr;
-// using sptr = std::shared_ptr;
+// define short aliases
+using i8 = int8_t;
+using i16 = int16_t;
+using i32 = int32_t;
+using i64 = int64_t;
+//using i128 = long long int;
+//using f16 = half_float::half;
+using f32 = float;
+using f64 = double;
+//using f128 = long double;
+using str = std::string;
+using cstr = const char*;
+
+//template<typename T>
+//using UPtr<T> = std::unique_ptr<T>;
+//template<typename T>
+//using Ptr = std::shared_ptr<T>;
 // using wptr = std::weak_ptr;
 
 #define assertm(exp, msg) assert(((void)msg, exp))
