@@ -1,27 +1,32 @@
+#pragma once
 #include <iostream>
 #include <coroutine>
-#include <fstream>
 #include <ranges>
 #include <memory>
 #include <__generator.hpp>  //reference implementation of generator
+#include <argparse.hpp>
 #include <torch/torch.h>
 #include <sentencepiece_processor.h>
+
 #include "../common/utils.hpp"
 #include "../common/commons.hpp"
+#include "../common/config.hpp"
+#include "../common/data.hpp"
+#include "../nmt/transformer.hpp"
+
 
 namespace nn = torch::nn;
 namespace optim = torch::optim;
-namespace fs = std::filesystem;
 namespace sp = sentencepiece;
 
 using namespace std;
 using namespace torch::indexing;
+using namespace rtg;
 
 
 //torch::Device device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
 
-
-namespace rtg::trainer {
+namespace rtg::train {
 
     struct TrainerOptions {
         vector<string> data_paths;
@@ -30,85 +35,6 @@ namespace rtg::trainer {
         int32_t batch_size;
     };
 
-    struct Example {
-
-        int64_t id;
-        vector<string> fields;
-        vector<vector<int32_t>> field_ids;
-
-        Example(int64_t id, vector<string> fields, vector<vector<int32_t>> field_ids)
-        : id(id), fields(fields), field_ids(field_ids) {}
-
-        ~Example() {}
-        
-        //copy ctr
-        Example(const Example& other)
-        : id(other.id), fields(other.fields), field_ids(other.field_ids) {}
-
-        //copy assignment
-        Example& operator=(const Example& other) {
-            if (this != &other) {
-                id = other.id;
-                fields = other.fields;
-                field_ids = other.field_ids;
-            }
-            return *this;
-        }
-
-        // move ctr
-        Example(Example&& other) noexcept:
-         id(other.id), fields(other.fields), field_ids(other.field_ids) {
-        }
-
-        friend std::ostream& operator<<(std::ostream& os, const Example& example);
-       
-    };
-
-    // operator<<
-    std::ostream& operator<<(std::ostream& os, const Example& ex) {
-        os << "Example(" << ex.id << "; fields(" << 
-        ex.fields.size() << "): " << ex.fields 
-        << "; ids: (" << ex.field_ids.size() << "))";
-        return os;
-    }
-
-    struct Batch {
-
-        vector<torch::Tensor> fields;
-        vector<Example> examples;
-
-        Batch(vector<torch::Tensor> fields, vector<Example> examples)
-        : fields(fields), examples(examples) {}
-    
-        static Batch from_buffer(vector<Example> buffer){
-            /**
-             * Convert a buffer of Examples to a Batch
-            */
-            int32_t batch_size = buffer.size();
-            assert (batch_size > 0);
-            int32_t num_fields = buffer[0].field_ids.size();
-
-            vector<int32_t> max_lens(num_fields, 0);
-            for (const auto& ex : buffer) {
-                for (size_t i = 0; i < num_fields; ++i) {
-                    max_lens[i] = std::max(max_lens[i], (int32_t)ex.field_ids[i].size());
-                }
-            }
-
-            vector<torch::Tensor> fields(num_fields);
-            int64_t pad_id = 0;  // pad token id
-            for (size_t i = 0; i < num_fields; ++i) {
-                fields[i] = torch::full({batch_size, max_lens[i]}, pad_id, torch::kLong);
-                for (int32_t j = 0; j < buffer.size(); ++j) {
-                    auto ids = torch::tensor( buffer[j].field_ids[i], torch::kLong);
-                    fields[i].index_put_({j, Slice(0,  buffer[j].field_ids[i].size())}, ids);
-                }
-            }
-            return Batch(fields, buffer);
-        }
-        
-        ~Batch() {}
-    };
 
     template <typename M, typename C>
     class Trainer {
@@ -170,7 +96,7 @@ namespace rtg::trainer {
             }
         }
 
-        auto get_train_data(TrainerOptions& options) -> generator<Batch> {
+        auto get_train_data(TrainerOptions& options) -> generator<data::Batch> {
             auto batch_size = options.batch_size;
             auto data_paths = options.data_paths;
             LOG::info("Loading data from {}", fmt::join(data_paths, ","));
@@ -185,7 +111,7 @@ namespace rtg::trainer {
             }
 
             int64_t rec_num = 0;
-            vector<Example> buffer;
+            vector<data::Example> buffer;
             vector<string> fields;
             vector<vector<int32_t>> field_ids;
             while (true) {
@@ -210,17 +136,17 @@ namespace rtg::trainer {
                     spdlog::warn("Skipping empty record {}", rec_num);
                     continue;
                  }
-                auto ex = Example(rec_num, fields, field_ids);
+                auto ex = data::Example(rec_num, fields, field_ids);
                 buffer.push_back(ex);
                 rec_num++;
                 if (buffer.size() >= batch_size) {
-                    co_yield Batch::from_buffer(buffer);
-                    buffer = vector<Example>();
+                    co_yield data::Batch::from_buffer(buffer);
+                    buffer = vector<data::Example>();
                 }
             }
 
             if (!buffer.empty()) {
-                co_yield Batch::from_buffer(buffer);
+                co_yield data::Batch::from_buffer(buffer);
             }
 
             for (auto& file : files) {
@@ -229,7 +155,7 @@ namespace rtg::trainer {
         }
 
         void train(TrainerOptions& options) {
-            spdlog::info("Training started");
+            spdlog::info("Training started; total epochs = {}", options.epochs);
             int64_t step_num = 0;
             for (int32_t epoch = 0; epoch < options.epochs; epoch++) {
                 auto train_data = get_train_data(options);
@@ -239,25 +165,105 @@ namespace rtg::trainer {
                     for (auto& ex : batch.examples) {
                         cout << "####" << ex.id << "\t" << ex.fields << "\n";
                     }
-                    auto src_ids = batch.fields[0].transpose(0, 1);  // [Seq_len, Batch_size]
-                    auto tgt_ids = batch.fields[1].transpose(0, 1);   // [Seq_len, Batch_size]
+                    //auto src_ids = batch.fields[0].transpose(0, 1);  // [Seq_len, Batch_size]
+                    //auto tgt_ids = batch.fields[1].transpose(0, 1);   // [Seq_len, Batch_size]
+                    auto src_ids = batch.fields[0];  // [batch_size, seq_len]
+                    auto tgt_ids = batch.fields[1];   // [batch_size, seq_len]
                     cout << "src_ids: " << src_ids.sizes() << "\t" << "tgt_ids: " << tgt_ids.sizes() << "\n";
                     auto pad_id = 0;
-                    auto src_mask = src_ids == pad_id;
-                    auto tgt_mask = tgt_ids == pad_id;
+                    auto src_mask = (src_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
+                    auto tgt_mask = (tgt_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]   // todo: make autoregressive mask
+
                     auto output = model(src_ids, tgt_ids, src_mask, tgt_mask);
-                    auto loss = criterion(output, tgt_ids);
-                    //cout << "loss: " << loss << "\n";
+                    auto output_flat = output.view({output.size(0) * output.size(1), -1}); // [batch_size * seq_len, vocab_size]
+                    auto tgt_ids_flat = tgt_ids.view({-1}); // [batch_size * seq_len]
+                    cout << "output_flat: " << output_flat.sizes() << "\t" << "tgt_ids_flat: " << tgt_ids_flat.sizes() << "\n";
+                    auto loss = criterion(output_flat, tgt_ids_flat); // TODO: exclude padding tokens
+                    cout << "loss: " << loss << "\n";
 
                     optimizer.zero_grad();
                     loss.backward();
                     optimizer.step();
                     scheduler.step();
                     step_num++;
+
+                    if (step_num >  20) {
+                        std::cout << "Training aborted manually....\n";
+                        return;
+                    }
                 }
             }
         }
     };
 
+    auto parse_args(int argc, char* argv[]) -> argparse::ArgumentParser {
+        argparse::ArgumentParser parser("trainer");
+        parser.add_argument("-v", "--verbose").help("Increase log verbosity")
+            .default_value(false).implicit_value(true);
+        parser.add_argument("work_dir").help("Working directory").required();
+        parser.add_argument("-c", "--config").help("Config file. Optional: default is config.toml in work_dir");
+
+        try {
+            parser.parse_args(argc, argv);
+        }
+        catch (const std::runtime_error& err) {
+            std::cerr << err.what() << std::endl;
+            std::cerr << parser;
+            exit(1);
+        }
+        return parser;
+    }
+}
+
+
+int main(int argc, char* argv[]) {
+    
+
+    auto args = train::parse_args(argc, argv);
+    if (args.get<bool>("verbose")) {
+        spdlog::set_level(spdlog::level::debug);
+    }
+
+    auto work_dir = fs::path {args.get<std::string>("work_dir")};
+    spdlog::info("work_dir: {}", work_dir);
+    auto config_file_arg = args.get<std::string>("config");
+    
+    namespace fs = std::filesystem;
+    fs::path config_file =  work_dir / "config.yaml";
+    if (!fs::exists(work_dir)){
+        spdlog::info("Creating work dir {}", work_dir);
+        fs::create_directories(work_dir);
+    }
+    if (!config_file_arg.empty()){
+        spdlog::info("copying config file {} -> {}", config_file_arg, config_file);
+        fs::copy(fs::path(config_file_arg), config_file,
+                    fs::copy_options::overwrite_existing);
+    }
+    if (!fs::exists(config_file)) {
+        spdlog::error("config file {} not found", config_file);
+        throw std::runtime_error("config file" + std::string(config_file) + "not found");
+    }
+
+    auto config = rtg::config::Config(config_file);
+    auto model = nmt::transformer::TransformerNMT(config);
+
+
+    auto criterion = nn::CrossEntropyLoss();
+    auto optimizer = optim::Adam(model->parameters(), optim::AdamOptions(0.0001));
+    auto scheduler = optim::StepLR(optimizer, 1.0, 0.95);
+
+    auto trainer_conf = config["trainer"];
+    train::TrainerOptions options {
+        .data_paths = trainer_conf["data"].as<std::vector<std::string>>(),
+        .vocab_paths = config["schema"]["vocabs"].as<std::vector<std::string>>(),
+        .epochs = trainer_conf["epochs"].as<int>(),
+        .batch_size = trainer_conf["batch_size"].as<int>(),
+    };
+
+    auto trainer = train::Trainer<nmt::transformer::TransformerNMT, nn::CrossEntropyLoss>(
+        model, criterion, optimizer, scheduler, options);
+    trainer.train(options);
+    spdlog::info("main finished..");
+    return 0;
 }
 

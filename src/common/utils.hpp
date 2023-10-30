@@ -1,6 +1,8 @@
-#include<fstream>
-#include<filesystem>
-#include<__generator.hpp>
+#pragma once
+
+#include <fstream>
+#include <filesystem>
+#include <__generator.hpp>
 
 
 namespace rtg::utils {

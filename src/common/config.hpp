@@ -10,6 +10,7 @@
 
 
 namespace rtg::config {
+
     class Config: public YAML::Node {
     
     public:
