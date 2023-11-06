@@ -17,6 +17,7 @@ namespace sp = sentencepiece;
 
 using namespace std;
 using namespace torch::indexing;
+using namespace rtg;
 
 namespace rtg::data {
     
@@ -95,6 +96,13 @@ namespace rtg::data {
                 }
             }
             return Batch(fields, buffer);
+        }
+
+        auto to(torch::Device& device) -> Batch& {
+            for (auto& field : fields) {
+                field = field.to(device);
+            }
+            return *this;
         }
         
         ~Batch() {}

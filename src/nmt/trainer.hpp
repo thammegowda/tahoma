@@ -37,7 +37,7 @@ namespace rtg::train {
         std::shared_ptr<optim::Optimizer> optimizer;
         std::shared_ptr<optim::LRScheduler> scheduler;
         vector<std::shared_ptr<sp::SentencePieceProcessor>> vocabs;
-
+        torch::Device device { torch::cuda::is_available() ? "cuda" :"cpu" };
     public:
         
         static auto load_vocabs(const config::Config& config) -> vector<std::shared_ptr<sp::SentencePieceProcessor>> {
@@ -60,35 +60,44 @@ namespace rtg::train {
             return spps;
         }
 
-        static auto init_model(config::Config& config) -> M {
-            auto model_type = config["model"]["type"].as<string>();
+        static auto init_model(config::Config& config, torch::Device& device) -> M {
+            auto model_type = config["model"]["name"].as<string>();
             if (model_type == "transformer") {
-                return nmt::transformer::TransformerNMT(config);
+                YAML::Node model_args = config["model"]["args"];
+                auto model = nmt::transformer::TransformerNMT(model_args);
+                //model->to(device);
+                return model;
             } else {
                 throw runtime_error("Unknown model type " + model_type);
             }
         }
 
         static auto init_criterion(const config::Config& config) -> C {
-            return nn::CrossEntropyLoss();
+            return nn::CrossEntropyLoss(nn::CrossEntropyLossOptions().reduction(torch::kNone));
         }
 
-        static auto init_optimizer(const config::Config& config, M model) -> std::shared_ptr<optim::Optimizer> {
+        static auto init_optimizer(const config::Config& config, M model)
+             -> std::shared_ptr<optim::Optimizer> {
+            auto optim_config = config["optimizer"];
+            auto optim_name = optim_config["name"].as<string>();
             return std::make_shared<optim::Adam>(model->parameters(), optim::AdamOptions(0.0001));
         }
 
-        static auto init_scheduler(const config::Config& config, optim::Optimizer& optimizer) -> std::shared_ptr<optim::LRScheduler> {
+        static auto init_scheduler(const config::Config& config, optim::Optimizer& optimizer)
+             -> std::shared_ptr<optim::LRScheduler> {
             return std::make_shared<optim::StepLR>(optimizer, 1.0, 0.95);
         }
 
         Trainer(config::Config& conf):
             config {conf},
-            model {init_model(config)},
+            model {init_model(config, device)},
             criterion {init_criterion(config)},
             optimizer {init_optimizer(config, model)},
             scheduler {init_scheduler(config, *optimizer)},
             vocabs {load_vocabs(config)}
-        {}
+        {
+            spdlog::info("Trainer initialized; device = {}", device == torch::kCUDA ? "cuda" : "cpu");
+        }
 
         ~Trainer() {
             for (auto& vocab : vocabs) {
@@ -165,16 +174,9 @@ namespace rtg::train {
             for (int32_t epoch = 0; epoch < num_epochs; epoch++) {
                 auto train_data = get_train_data();
                 for (auto batch : train_data) {
-                    cout << "epoch: " << epoch << "; step: " << step_num 
-                        << "; src: " << batch.fields[0].sizes() << " tgt: " << batch.fields[1].sizes() << "\n";
-                    for (auto& ex : batch.examples) {
-                        cout << "####" << ex.id << "\t" << ex.fields << "\n";
-                    }
-                    //auto src_ids = batch.fields[0].transpose(0, 1);  // [Seq_len, Batch_size]
-                    //auto tgt_ids = batch.fields[1].transpose(0, 1);   // [Seq_len, Batch_size]
                     auto src_ids = batch.fields[0];  // [batch_size, seq_len]
                     auto tgt_ids = batch.fields[1];   // [batch_size, seq_len]
-                    cout << "src_ids: " << src_ids.sizes() << "\t" << "tgt_ids: " << tgt_ids.sizes() << "\n";
+                    //batch = batch.to(device);
                     auto pad_id = 0;
                     auto src_mask = (src_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
                     auto tgt_mask = (tgt_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]   // todo: make autoregressive mask
@@ -182,9 +184,14 @@ namespace rtg::train {
                     auto output = model(src_ids, tgt_ids, src_mask, tgt_mask);
                     auto output_flat = output.view({output.size(0) * output.size(1), -1}); // [batch_size * seq_len, vocab_size]
                     auto tgt_ids_flat = tgt_ids.view({-1}); // [batch_size * seq_len]
-                    cout << "output_flat: " << output_flat.sizes() << "\t" << "tgt_ids_flat: " << tgt_ids_flat.sizes() << "\n";
-                    auto loss = criterion(output_flat, tgt_ids_flat); // TODO: exclude padding tokens
-                    cout << "loss: " << loss << "\n";
+                    auto loss = criterion(output_flat, tgt_ids_flat);  // [batch_size * seq_len]
+                    //exclude padding tokens from loss calculation
+                    loss.masked_fill_(tgt_ids_flat == pad_id, 0.0);
+                    auto normalizer = (tgt_ids_flat != pad_id).sum().item(); // #total - #mask
+                    //assert(normalizer > 0.0);
+                    loss = loss.sum() / normalizer;
+                    //assert(!std::isnan(loss.item<float>()));
+                    cout << "loss: " << loss.item() << "; sents: " << src_ids.sizes()[0] << "; tokens: " << normalizer << "\n";
 
                     optimizer->zero_grad();
                     loss.backward();

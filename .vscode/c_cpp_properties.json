@@ -4,7 +4,8 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/libs/libtorch/include/torch/csrc/api/include",
+                "${workspaceFolder}/libs/libtorch-cu121/include",
+                "${workspaceFolder}/libs/libtorch-cu121/include/torch/csrc/api/include",
                 "${workspaceFolder}/libs/yaml-cpp/include",
                 "${workspaceFolder}/libs/sentencepiece/"
             ],
@@ -13,7 +14,7 @@
             "configurationProvider": "ms-vscode.cmake-tools",
             "cppStandard": "c++23",
             "cStandard": "c23",
-            "compilerPath": "/usr/bin/g++-12"
+            "compilerPath": "/usr/bin/g++-11"
         }
     ],
     "version": 4
