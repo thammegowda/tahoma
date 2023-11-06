@@ -1,13 +1,23 @@
 model:
-  type: transformer
-  model_dim: 512
-  src_vocab_size: 8000
-  tgt_vocab_size: 8000
-  encoder_layers: 12
-  decoder_layers: 3
-  attn_head: 8
-  ffn_dim: 2048
-  dropout: 0.1
+  name: transformer
+  args:
+    model_dim: 128
+    src_vocab_size: 8000
+    tgt_vocab_size: 8000
+    encoder_layers: 3
+    decoder_layers: 1
+    attn_head: 2
+    ffn_dim: 256
+    dropout: 0.1
+
+optimizer:
+  name: adam
+  args:
+    betas:
+      - 0.9
+      - 0.98
+    eps: 1e-9
+    weight_decay: 0.0001
 
 schema:
   fields:
@@ -18,13 +28,7 @@ schema:
     - data/vocab.joint.8k.model
   shared_vocabs: true
 
-optimizer:
-  name: adam
-  betas:
-    - 0.9
-    - 0.98
-  eps: 1e-9
-  weight_decay: 0.0001
+
 
 trainer:
   data:

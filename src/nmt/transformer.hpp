@@ -4,7 +4,6 @@
 #include <tuple>
 #include <assert.h>
 #include <torch/torch.h>
-//#include <toml++/toml.h>
 #include "../common/config.hpp"
 
 
@@ -48,9 +47,7 @@ namespace rtg::nmt::transformer {
             // x = x+pe[:, :x.size(1)]
             auto pe = positions.index({ Slice(), Slice(None, x.size(1)) });
             x = x + pe;
-            if (is_training()) {
-                x = dropout(x);
-            }
+            x = dropout(x);
             return x;
         }
     };
@@ -109,7 +106,7 @@ namespace rtg::nmt::transformer {
             }
             attn_weights = F::softmax(attn_weights, -1); // [batch_size, nhead, tgt_len, src_len]
             attn_weights = dropout(attn_weights);
-            std::cout << "attn_weights" << attn_weights.sizes() << "\t v" << v.sizes() << std::endl;
+            //std::cout << "attn_weights" << attn_weights.sizes() << "\t v" << v.sizes() << std::endl;
             auto attn_output = torch::matmul(attn_weights, v) // [batch_size, nhead, tgt_len, model_dim / nhead]
                                 .transpose(1, 2)              // [batch_size, tgt_len, nhead, model_dim / nhead]
                                 .contiguous().view({ batch_size, tgt_len, model_dim }); // [batch_size, tgt_len, model_dim]
@@ -187,7 +184,6 @@ namespace rtg::nmt::transformer {
             num_layers{ num_layers }
         {
         }
-
         auto forward(torch::Tensor& src, torch::Tensor& src_mask) -> torch::Tensor {
             // src: [batch_size, src_len]
             // src_mask: [batch_size, 1, src_len]
@@ -242,7 +238,8 @@ namespace rtg::nmt::transformer {
         {
         }
 
-        auto forward(torch::Tensor& tgt, torch::Tensor& memory, torch::Tensor& tgt_mask, torch::Tensor& memory_mask) -> torch::Tensor {
+        auto forward(torch::Tensor& tgt, torch::Tensor& memory,
+             torch::Tensor& tgt_mask, torch::Tensor& memory_mask) -> torch::Tensor {
             // tgt: [batch_size, tgt_len, model_dim]
             // memory: [batch_size, src_len, model_dim]
             // tgt_mask: [batch_size, 1, tgt_len]
@@ -326,37 +323,34 @@ namespace rtg::nmt::transformer {
         Encoder encoder;
         Decoder decoder;
 
-        TransformerNMTImpl(const rtg::config::Config& config):
-            src_vocab_size { config["model"]["src_vocab_size"].as<int>() },
-            tgt_vocab_size { config["model"]["tgt_vocab_size"].as<int>() },
-            model_dim { config["model"]["model_dim"].as<int>() },
+        TransformerNMTImpl(const YAML::Node& args):
+            src_vocab_size { args["src_vocab_size"].as<int>() },
+            tgt_vocab_size { args["tgt_vocab_size"].as<int>() },
+            model_dim { args["model_dim"].as<int>() },
 
             encoder {
                 register_module("encoder", Encoder(
                 src_vocab_size,
                 model_dim,
-                config["model"]["attn_head"].as<int>(),
-                config["model"]["encoder_layers"].as<int>(),
-                config["model"]["dropout"].as<double>()))
+                args["attn_head"].as<int>(),
+                args["encoder_layers"].as<int>(),
+                args["dropout"].as<double>()))
             },
             decoder {
                 register_module("decoder",  Decoder(
                 tgt_vocab_size,
                 model_dim,
-                config["model"]["attn_head"].as<int>(),
-                config["model"]["decoder_layers"].as<int>(),
-                config["model"]["dropout"].as<double>()))
+                args["attn_head"].as<int>(),
+                args["decoder_layers"].as<int>(),
+                args["dropout"].as<double>()))
             }
         {}
 
-        auto forward(torch::Tensor& src, torch::Tensor& tgt, torch::Tensor& src_mask, torch::Tensor& tgt_mask) -> torch::Tensor {
+        auto forward(torch::Tensor& src, torch::Tensor& tgt, 
+            torch::Tensor& src_mask, torch::Tensor& tgt_mask) -> torch::Tensor {
             // src: [batch_size, src_len]
             // tgt: [batch_size, tgt_len]
             // return: [batch_size, tgt_len, tgt_vocab_size]
-
-            std::cout << "src: " << src.sizes() << std::endl;
-            std::cout << "tgt: " << tgt.sizes() << std::endl;
-
             auto memory = encoder(src, src_mask); // [batch_size, src_len, model_dim]
             auto output = decoder(tgt, memory, tgt_mask, src_mask); // [batch_size, tgt_len, model_dim]
             return output;
