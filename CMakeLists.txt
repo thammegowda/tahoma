@@ -1,20 +1,51 @@
-cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25.2 FATAL_ERROR)  
+# older cmake doesnt support CUDA_STANDARD 20
 project(rtgp CXX C)
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 23)  # cuda doesnt support c++23 yet
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-option(USE_CCACHE "Use ccache compiler cache (https://ccache.dev)" ON)
+set (CMAKE_CUDA_STANDARD 20) 
+set (CMAKE_CUDA_STANDARD_REQUIRED ON)
 
+# set options with default values
+option(USE_CCACHE "Use ccache compiler cache (https://ccache.dev)" ON)
+option(USE_CUDA "Use CUDA libtorch. Default is CPU only libtorch" OFF)
+option(USE_ROCM "Use ROCM libtorch. Default is CPU only libtorch" OFF)
+option(USE_PYTORCH "Use libtorch from the available pytorch installation
+     (i.e., torch.utils.cmake_prefix_path). This can be CPU/CUDA/ROCM build." OFF)
+if (USE_CUDA AND USE_ROCM)
+    message(FATAL_ERROR "USE_CUDA and USE_ROCM cannot be set at the same time")
+endif()
+
+set(PYTHON_EXECUTABLE python CACHE FILEPATH "Python executable name path. Used to find libtorch from pytorch installation")
 find_package(Git QUIET)
 
 set(CMAKE_BUILD_TYPE Debug)
 
-# TODO  libtorch as fetchcontent https://cmake.org/cmake/help/latest/module/FetchContent.html
-list(APPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/libs/libtorch" CACHE PATH "libTorch path")
+if (USE_CUDA)
+    set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cu121" CACHE PATH "libTorch CUDA path")
+    if(NOT CUDA_ROOT_DIR)
+        set(CUDA_ROOT_DIR "/usr/local/cuda" CACHE PATH "CUDA root path")
+    endif()
+    set(CMAKE_CUDA_COMPILER ${CUDA_ROOT_DIR}/bin/nvcc)
+
+elseif (USE_ROCM)
+    set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-rocm" CACHE PATH "libTorch ROCM path")
+elseif (USE_PYTORCH)
+    execute_process(
+        COMMAND "${PYTHON_EXECUTABLE}" -c "import torch; print(torch.utils.cmake_prefix_path)"
+        OUTPUT_VARIABLE LIBTORCH_PY_PATH
+        OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ECHO STDOUT)
+else()
+    # CPU only build by default
+    set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cpu" CACHE PATH "libTorch CPU path")
+endif()
+    
+message(STATUS "LIBTORCH_PATH: ${LIBTORCH_PATH}")
+list(APPEND CMAKE_PREFIX_PATH "${LIBTORCH_PATH}" CACHE PATH "libTorch path")
 
 find_package(Torch REQUIRED)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 set(EXT_LIBS "${TORCH_LIBRARIES}")
-
 
 if(USE_CCACHE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -C")

@@ -1,8 +1,10 @@
 build/
-libs/libtorch
+libs/libtorch*
 data/*
 !data/setup.sh
 
 .history*
+**.zip
+**.so
 
 .vscode/settings.json
