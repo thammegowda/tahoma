@@ -23,10 +23,10 @@ set(CMAKE_BUILD_TYPE Debug)
 
 if (USE_CUDA)
     set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cu121" CACHE PATH "libTorch CUDA path")
-    if(NOT CUDA_ROOT_DIR)
-        set(CUDA_ROOT_DIR "/usr/local/cuda" CACHE PATH "CUDA root path")
+    if(NOT CUDA_TOOLKIT_ROOT_DIR)
+        set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda" CACHE PATH "CUDA root path")
     endif()
-    set(CMAKE_CUDA_COMPILER ${CUDA_ROOT_DIR}/bin/nvcc)
+    set(CMAKE_CUDA_COMPILER ${CUDA_TOOLKIT_ROOT_DIR}/bin/nvcc)
 
 elseif (USE_ROCM)
     set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-rocm" CACHE PATH "libTorch ROCM path")
