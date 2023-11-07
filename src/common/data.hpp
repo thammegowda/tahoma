@@ -99,8 +99,8 @@ namespace rtg::data {
         }
 
         auto to(torch::Device& device) -> Batch& {
-            for (auto& field : fields) {
-                field = field.to(device);
+            for(auto idx = 0; idx < fields.size(); ++idx) {
+                fields[idx] = fields[idx].to(device);
             }
             return *this;
         }

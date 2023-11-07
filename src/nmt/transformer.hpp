@@ -25,21 +25,17 @@ namespace rtg::nmt::transformer {
             dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
             positions{ torch::zeros({1, max_len, model_dim}, torch::requires_grad(false)) }
         {
-
             /* python ::
-                pe = torch.zeros(max_len, d_model)
+                pe = torch.zeros(1, max_len, d_model)
                 position = torch.arange(0, max_len).unsqueeze(1)
                 div_term = torch.exp(torch.arange(0, d_model, 2) * -(math.log(10000.0) / d_model))
-                pe[:, 0::2] = torch.sin(position * div_term)
-                pe[:, 1::2] = torch.cos(position * div_term)
-                pe = pe.unsqueeze(0)
-                */
-
+                pe[:, :, 0::2] = torch.sin(position * div_term)
+                pe[:, :, 1::2] = torch.cos(position * div_term)  */
             auto pos = torch::arange(max_len, torch::kLong);         // [max_len]
             auto div_term = torch::exp(torch::arange(0, model_dim, 2) * (-std::log(10'000.0) / model_dim));
             positions.index_put_({ Slice(), Slice(), Slice(0, None, 2) }, torch::sin(pos.unsqueeze(1) * div_term));
             positions.index_put_({ Slice(), Slice(), Slice(1, None, 2) }, torch::cos(pos.unsqueeze(1) * div_term));
-            //positions = positions.unsqueeze(0);                           // [1, max_len, model_dim]
+            register_buffer("positions", positions);  //required for this->to(device) to work
         }
 
         auto forward(torch::Tensor& x) -> torch::Tensor {
@@ -50,6 +46,15 @@ namespace rtg::nmt::transformer {
             x = dropout(x);
             return x;
         }
+
+        /*
+        auto to(torch::Device& device) -> PositionEmbeddingImpl& {
+            embedding->to(device);
+            this->positions = positions.to(device);
+            return *this;
+        }
+        */
+
     };
     TORCH_MODULE(PositionEmbedding);
 
