@@ -1,13 +1,13 @@
 model:
   name: transformer
   args:
-    model_dim: 128
+    model_dim: 512
     src_vocab_size: 8000
     tgt_vocab_size: 8000
-    encoder_layers: 3
-    decoder_layers: 1
-    attn_head: 2
-    ffn_dim: 256
+    encoder_layers: 6
+    decoder_layers: 3
+    attn_head: 8
+    ffn_dim: 2048
     dropout: 0.1
 
 optimizer:
@@ -28,17 +28,15 @@ schema:
     - data/vocab.joint.8k.model
   shared_vocabs: true
 
-
-
 trainer:
   data:
     - data/train.kan
     - data/train.eng
-  batch_size: 3
-  epochs: 100
+  batch_size: 2
+  epochs: 25
   max_length:
-    - 100
-    - 100
+    - 80
+    - 80
   max_length_crop: true
 
 validator:

@@ -105,7 +105,7 @@ namespace rtg::train {
                     fs::create_directories(work_dir);
                 }
                 spdlog::info("Copy {} ➡️ {}", config_file, work_config);
-                fs::copy(work_config, config_file, fs::copy_options::overwrite_existing);
+                fs::copy(config_file, work_config, fs::copy_options::overwrite_existing);
             }
             if (!fs::exists(work_config)) {
                 throw runtime_error(fmt::format("Config file {} not found", work_config.string()));
@@ -204,7 +204,9 @@ namespace rtg::train {
             LOG::info("Moving to device {}", device == torch::kCUDA ? "cuda" : "cpu");
 
             spdlog::info("Training started; total epochs = {}", num_epochs);
-            int64_t step_num = 0;
+            size_t step_num = 0;
+            size_t tot_sents = 0;
+            size_t tot_tokens = 0;
             for (int32_t epoch = 0; epoch < num_epochs; epoch++) {
                 auto train_data = get_train_data();
                 for (auto batch : train_data) {
@@ -221,22 +223,23 @@ namespace rtg::train {
                     auto loss = criterion(output_flat, tgt_ids_flat);  // [batch_size * seq_len]
                     //exclude padding tokens from loss calculation
                     loss.masked_fill_(tgt_ids_flat == pad_id, 0.0);
-                    auto normalizer = (tgt_ids_flat != pad_id).sum().item(); // #total - #mask
+                    long normalizer = (tgt_ids_flat != pad_id).sum().item().toInt(); // #total - #mask
                     //assert(normalizer > 0.0);
                     loss = loss.sum() / normalizer;
                     //assert(!std::isnan(loss.item<float>()));
-                    cout << "loss: " << loss.item() << "; sents: " << src_ids.sizes()[0] << "; tokens: " << normalizer << "\n";
-
-                    optimizer->zero_grad();
+                    
                     loss.backward();
                     optimizer->step();
                     scheduler->step();
-                    step_num++;
+                    optimizer->zero_grad();
 
-                    if (step_num >  20) {
-                        std::cout << "Training aborted manually....\n";
-                        return;
+                    tot_sents += src_ids.sizes()[0];
+                    tot_tokens += normalizer;
+                    if (step_num % 25 == 0) {
+                        cerr << "Step: " << step_num << "; loss: " << loss.item() << "; sents: " << tot_sents  << "; toks: " << tot_tokens << "\n";
+                        //assert(!torch::isnan(loss));
                     }
+                    step_num++;
                 }
             }
         }
