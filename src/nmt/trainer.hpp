@@ -18,6 +18,7 @@
 namespace nn = torch::nn;
 namespace optim = torch::optim;
 namespace sp = sentencepiece;
+namespace fs = std::filesystem;
 
 using namespace std;
 using namespace torch::indexing;
@@ -31,6 +32,7 @@ namespace rtg::train {
     template <typename M, typename C>
     class Trainer {
     protected:
+        fs::path work_dir;
         config::Config config;
         M model;
         C criterion;
@@ -87,8 +89,32 @@ namespace rtg::train {
              -> std::shared_ptr<optim::LRScheduler> {
             return std::make_shared<optim::StepLR>(optimizer, 1.0, 0.95);
         }
+        static auto init_config(fs::path work_dir, fs::path config_file) -> config::Config {
+            /**
+             * 1. If config_file is not provided, look for config.yaml in work_dir
+             * 2. If config_file is provided, copy it to work_dir and use it
+             * 3. If config_file is not provided and config.yaml is not found in work_dir, raise error
+            */
+            auto work_config = work_dir / "config.yaml";
+            if (!config_file.empty()) { // given non empty config_file
+                if (!fs::is_regular_file(config_file)) {
+                    throw runtime_error(fmt::format("Config file {} not found", config_file.string()));
+                }    
+                if (!fs::exists(work_dir)){
+                    spdlog::info("mkdir {}", work_dir);
+                    fs::create_directories(work_dir);
+                }
+                spdlog::info("Copy {} ➡️ {}", config_file, work_config);
+                fs::copy(work_config, config_file, fs::copy_options::overwrite_existing);
+            }
+            if (!fs::exists(work_config)) {
+                throw runtime_error(fmt::format("Config file {} not found", work_config.string()));
+            }
+            return config::Config(config_file);
+        }
 
-        Trainer(config::Config& conf):
+        Trainer(fs::path work_dir, config::Config conf):
+            work_dir {work_dir},
             config {conf},
             model {init_model(config, device)},
             criterion {init_criterion(config)},
@@ -96,8 +122,12 @@ namespace rtg::train {
             scheduler {init_scheduler(config, *optimizer)},
             vocabs {load_vocabs(config)}
         {
-            spdlog::info("Trainer initialized; device = {}", device == torch::kCUDA ? "cuda" : "cpu");
+            spdlog::info("Trainer initialized; work_dir={} device = {}", work_dir, device == torch::kCUDA ? "cuda" : "cpu");
         }
+
+        Trainer(fs::path work_dir, fs::path config_file)
+        : Trainer(work_dir, init_config(work_dir, config_file))
+        {}
 
         ~Trainer() {
             for (auto& vocab : vocabs) {
@@ -168,15 +198,19 @@ namespace rtg::train {
 
         void train() {
             size_t num_epochs = config["trainer"]["epochs"].as<int>();
+            auto model = this->model;
+            model->train();
+            model->to(device);
+            LOG::info("Moving to device {}", device == torch::kCUDA ? "cuda" : "cpu");
 
             spdlog::info("Training started; total epochs = {}", num_epochs);
             int64_t step_num = 0;
             for (int32_t epoch = 0; epoch < num_epochs; epoch++) {
                 auto train_data = get_train_data();
                 for (auto batch : train_data) {
+                    batch = batch.to(device);
                     auto src_ids = batch.fields[0];  // [batch_size, seq_len]
                     auto tgt_ids = batch.fields[1];   // [batch_size, seq_len]
-                    //batch = batch.to(device);
                     auto pad_id = 0;
                     auto src_mask = (src_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
                     auto tgt_mask = (tgt_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]   // todo: make autoregressive mask
@@ -229,36 +263,17 @@ namespace rtg::train {
 
 
 int main(int argc, char* argv[]) {
-    
-
     auto args = train::parse_args(argc, argv);
     if (args.get<bool>("verbose")) {
         spdlog::set_level(spdlog::level::debug);
     }
-
     auto work_dir = fs::path {args.get<std::string>("work_dir")};
-    spdlog::info("work_dir: {}", work_dir);
     auto config_file_arg = args.get<std::string>("config");
-    
-    namespace fs = std::filesystem;
-    fs::path config_file =  work_dir / "config.yaml";
-    if (!fs::exists(work_dir)){
-        spdlog::info("Creating work dir {}", work_dir);
-        fs::create_directories(work_dir);
+    fs::path config_file;
+    if (!config_file_arg.empty()) {
+        config_file = fs::path {config_file_arg};
     }
-    if (!config_file_arg.empty()){
-        spdlog::info("copying config file {} -> {}", config_file_arg, config_file);
-        fs::copy(fs::path(config_file_arg), config_file, fs::copy_options::overwrite_existing);
-    }
-
-    if (!fs::exists(config_file)) {
-        spdlog::error("config file {} not found", config_file);
-        throw std::runtime_error("config file" + std::string(config_file) + "not found");
-    }
-
-    auto config = rtg::config::Config(config_file);
-    std::cout << "Config:\n\n" << config << "\n";
-    auto trainer = train::Trainer<nmt::transformer::TransformerNMT, nn::CrossEntropyLoss>(config);
+    auto trainer = train::Trainer<nmt::transformer::TransformerNMT, nn::CrossEntropyLoss>(work_dir, config_file);
     trainer.train();
     spdlog::info("main finished..");
     return 0;
