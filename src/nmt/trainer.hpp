@@ -205,6 +205,15 @@ namespace rtg::train {
             }
         }
 
+        auto subsequent_mask(int64_t seq_len, torch::Device device=torch::kCPU) -> Tensor{
+            // batch: [batch_size, seq_len]
+            // pad_idx: padding token id; usually 0; ignore if -1
+            // returns: [batch_size, seq_len, seq_len]
+            auto mask = torch::ones({seq_len, seq_len}, torch::dtype(torch::kInt8).device(device)); // all cells have 1
+            mask = torch::triu(mask, /*diagonal=*/1);            // upper triangle and diagonal are 1, lower diagonal are 0
+            return mask;
+        }
+
         void train() {
             size_t num_epochs = config["trainer"]["epochs"].as<int>();
             auto model = this->model;
@@ -232,7 +241,9 @@ namespace rtg::train {
                     auto src_ids = batch.fields[0];  // [batch_size, seq_len]
                     auto tgt_ids = batch.fields[1];   // [batch_size, seq_len]
                     auto src_mask = (src_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
-                    auto tgt_mask = (tgt_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]   //FIXME: make autoregressive mask
+                    auto tgt_mask_padding = (tgt_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len] 
+                    auto tgt_mask_autoreg = subsequent_mask(tgt_ids.size(1), device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len] 
+                    auto tgt_mask = tgt_mask_padding | tgt_mask_autoreg.type_as(tgt_mask_padding); // [batch_size, 1, seq_len, seq_len]
                     auto output = model(src_ids, tgt_ids, src_mask, tgt_mask);
                     auto normalizer = (tgt_ids != pad_id).sum().item().toInt(); // #total - #mask
                     //auto loss = simple_loss_computer(output, tgt_ids, projector, pad_id);
