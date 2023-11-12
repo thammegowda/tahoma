@@ -38,7 +38,7 @@ trainer:
     - 80
     - 80
   max_length_crop: true
-  fp16: true
+  fp16: false
   chunk_size: 4
 
 validator:
