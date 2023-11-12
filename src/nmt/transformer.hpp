@@ -1,9 +1,11 @@
 #pragma once
 #include <tuple>
+#include <cmath>
 #include <iostream>
 #include <tuple>
 #include <assert.h>
 #include <torch/torch.h>
+#include <ATen/autocast_mode.h>
 #include "../common/config.hpp"
 
 
@@ -20,7 +22,7 @@ namespace rtg::nmt::transformer {
         torch::Tensor positions;
         nn::Dropout dropout;
 
-        PositionEmbeddingImpl(int vocab_size, int model_dim, double dropout = 0.1, int max_len = 5000) :
+        PositionEmbeddingImpl(int vocab_size, int model_dim, double dropout = 0.1, const int max_len = 5000) :
             embedding{ register_module("embedding", nn::Embedding(nn::EmbeddingOptions(vocab_size, model_dim))) },
             dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
             positions{ torch::zeros({1, max_len, model_dim}, torch::requires_grad(false)) }
@@ -106,7 +108,10 @@ namespace rtg::nmt::transformer {
                 // insert head dim
                 //key_padding_mask = key_padding_mask.unsqueeze(1); // [batch_size, 1, 1, src_len]
                 assert(key_padding_mask.sizes().size() == 4); // must be a 4D tensor
-                float low_val = -1e9;   // TODO: check for float16 and bf16
+                float low_val = -1e9;
+                if (at::autocast::is_enabled()) {
+                    low_val = -pow(2, 14);   // -16384.0f; TODO: check for bf16
+                }
                 attn_weights = attn_weights.masked_fill(key_padding_mask, low_val);
             }
             attn_weights = F::softmax(attn_weights, -1); // [batch_size, nhead, tgt_len, src_len]
@@ -277,7 +282,6 @@ namespace rtg::nmt::transformer {
         nn::LayerNorm norm1;
         nn::Dropout dropout;
         nn::ModuleList layers;
-        nn::Linear out_proj;
 
         DecoderImpl(int vocab_size, int model_dim, int nhead, int num_layers, double dropout = 0.1) :
             model_dim {( assert(model_dim > 0),  model_dim )},
@@ -289,8 +293,7 @@ namespace rtg::nmt::transformer {
                 )},
             norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
             dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
-            layers{ register_module("layers", nn::ModuleList()) },
-            out_proj{ register_module("out_proj", nn::Linear(nn::LinearOptions(model_dim, vocab_size))) }
+            layers{ register_module("layers", nn::ModuleList()) }
         {
             for (int i = 0; i < num_layers; ++i) {
                 layers->push_back(DecoderLayer(model_dim, nhead, dropout));
@@ -313,7 +316,7 @@ namespace rtg::nmt::transformer {
             for (int i = 0; i < num_layers; ++i) {
                 x = layers->at<DecoderLayerImpl>(i).forward(x, memory, tgt_mask, memory_mask);
             }
-            x = out_proj(x); // [batch_size, tgt_len, vocab_size]
+            //x = lm_head(x); // [batch_size, tgt_len, vocab_size]
             return x;
         }
     };
@@ -327,6 +330,7 @@ namespace rtg::nmt::transformer {
 
         Encoder encoder;
         Decoder decoder;
+        nn::Linear lm_head;
 
         TransformerNMTImpl(const YAML::Node& args):
             src_vocab_size { args["src_vocab_size"].as<int>() },
@@ -348,7 +352,8 @@ namespace rtg::nmt::transformer {
                 args["attn_head"].as<int>(),
                 args["decoder_layers"].as<int>(),
                 args["dropout"].as<double>()))
-            }
+            },
+            lm_head { register_module("lm_head", nn::Linear(nn::LinearOptions(model_dim, tgt_vocab_size))) }
         {}
 
         auto forward(torch::Tensor& src, torch::Tensor& tgt, 
@@ -358,6 +363,7 @@ namespace rtg::nmt::transformer {
             // return: [batch_size, tgt_len, tgt_vocab_size]
             auto memory = encoder(src, src_mask); // [batch_size, src_len, model_dim]
             auto output = decoder(tgt, memory, tgt_mask, src_mask); // [batch_size, tgt_len, model_dim]
+            //output = lm_head(output); // [batch_size, tgt_len, tgt_vocab_size]
             return output;
         }
     };

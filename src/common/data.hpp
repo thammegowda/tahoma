@@ -6,8 +6,8 @@
 #include <__generator.hpp>  //reference implementation of generator
 #include <torch/torch.h>
 #include <sentencepiece_processor.h>
+#include <rtg.hpp>
 #include "utils.hpp"
-#include "commons.hpp"
 
 
 namespace nn = torch::nn;

@@ -12,6 +12,10 @@
 
 #define assertm(exp, msg) assert(((void)msg, exp))
 
+// define macro for aliasing std::shared_ptr<T> as Ptr<T>
+#define Ptr std::shared_ptr
+#define New std::make_shared
+
 namespace fs = std::filesystem;
 
 /// @brief formatter for filesystem:path to work with spdlog
@@ -31,6 +35,7 @@ struct fmt::formatter<fs::path> {
 
 
 namespace rtg {
+    
     namespace LOG = spdlog;
 
     // define short aliases
@@ -46,8 +51,9 @@ namespace rtg {
     using str = std::string;
     using cstr = const char*;
 
+    namespace torch = torch; // noop, but just incase you forgot
+    namespace nn = torch::nn;
     using Tensor = torch::Tensor;
-
     //auto k_device = torch::device(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
 
     //template<typename T>

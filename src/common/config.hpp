@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 #include <type_traits>
-#include "commons.hpp"
 #include <yaml-cpp/yaml.h>
+#include <rtg.hpp>
 
 
 namespace rtg::config {

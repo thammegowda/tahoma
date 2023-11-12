@@ -5,11 +5,12 @@
 #include <memory>
 #include <__generator.hpp>  //reference implementation of generator
 #include <argparse.hpp>
+
+#include <ATen/autocast_mode.h>
 #include <torch/torch.h>
 #include <sentencepiece_processor.h>
 
-#include "../common/utils.hpp"
-#include "../common/commons.hpp"
+#include <rtg.hpp>
 #include "../common/config.hpp"
 #include "../common/data.hpp"
 #include "../nmt/transformer.hpp"
@@ -29,20 +30,13 @@ using namespace rtg;
 
 namespace rtg::train {
 
-    template <typename M, typename C>
-    class Trainer {
-    protected:
-        fs::path work_dir;
-        config::Config config;
-        M model;
-        C criterion;
-        std::shared_ptr<optim::Optimizer> optimizer;
-        std::shared_ptr<optim::LRScheduler> scheduler;
-        vector<std::shared_ptr<sp::SentencePieceProcessor>> vocabs;
-        torch::Device device { torch::cuda::is_available() ? "cuda" :"cpu" };
-    public:
-        
-        static auto load_vocabs(const config::Config& config) -> vector<std::shared_ptr<sp::SentencePieceProcessor>> {
+    enum Mode{
+        TRAINING,
+        INFERENCE,
+    };
+
+
+    auto load_vocabs(const config::Config& config) -> vector<std::shared_ptr<sp::SentencePieceProcessor>> {
             auto vocab_paths = config["schema"]["vocabs"].as<std::vector<std::string>>();
             assert(!vocab_paths.empty()); // expected atleast one vocabulary
             // SentencePieceProcessor is not copyable and movable, so we use pointers
@@ -62,7 +56,8 @@ namespace rtg::train {
             return spps;
         }
 
-        static auto init_model(config::Config& config, torch::Device& device) -> M {
+        template <typename M>
+        auto init_model(config::Config& config, torch::Device& device) -> M {
             auto model_type = config["model"]["name"].as<string>();
             if (model_type == "transformer") {
                 YAML::Node model_args = config["model"]["args"];
@@ -74,26 +69,29 @@ namespace rtg::train {
             }
         }
 
-        static auto init_criterion(const config::Config& config) -> C {
+        template <typename C>
+        auto init_criterion(const config::Config& config) -> C {
             return nn::CrossEntropyLoss(nn::CrossEntropyLossOptions().reduction(torch::kNone));
         }
 
-        static auto init_optimizer(const config::Config& config, M model)
+        template <typename M>
+        auto init_optimizer(const config::Config& config, M model)
              -> std::shared_ptr<optim::Optimizer> {
             auto optim_config = config["optimizer"];
             auto optim_name = optim_config["name"].as<string>();
             return std::make_shared<optim::Adam>(model->parameters(), optim::AdamOptions(0.0001));
         }
 
-        static auto init_scheduler(const config::Config& config, optim::Optimizer& optimizer)
+        auto init_scheduler(const config::Config& config, optim::Optimizer& optimizer)
              -> std::shared_ptr<optim::LRScheduler> {
             return std::make_shared<optim::StepLR>(optimizer, 1.0, 0.95);
         }
-        static auto init_config(fs::path work_dir, fs::path config_file) -> config::Config {
-            /**
-             * 1. If config_file is not provided, look for config.yaml in work_dir
-             * 2. If config_file is provided, copy it to work_dir and use it
-             * 3. If config_file is not provided and config.yaml is not found in work_dir, raise error
+
+        auto init_config(fs::path work_dir, fs::path config_file) -> config::Config {
+            /*
+            * 1. If config_file is not provided, look for config.yaml in work_dir
+            * 2. If config_file is provided, copy it to work_dir and use it
+            * 3. If config_file is not provided and config.yaml is not found in work_dir, raise error
             */
             auto work_config = work_dir / "config.yaml";
             if (!config_file.empty()) { // given non empty config_file
@@ -113,14 +111,29 @@ namespace rtg::train {
             return config::Config(config_file);
         }
 
+    template <typename M, typename C>
+    class Trainer {
+    protected:
+        fs::path work_dir;
+        config::Config config;
+        M model;
+        C criterion;
+        std::shared_ptr<optim::Optimizer> optimizer;
+        std::shared_ptr<optim::LRScheduler> scheduler;
+        vector<std::shared_ptr<sp::SentencePieceProcessor>> vocabs;
+        torch::Device device { torch::cuda::is_available() ? "cuda" :"cpu" };
+        int32_t chunk_size;
+    public:
+        
         Trainer(fs::path work_dir, config::Config conf):
             work_dir {work_dir},
             config {conf},
-            model {init_model(config, device)},
-            criterion {init_criterion(config)},
+            model {init_model<M>(config, device)},
+            criterion {init_criterion<C>(config)},
             optimizer {init_optimizer(config, model)},
             scheduler {init_scheduler(config, *optimizer)},
-            vocabs {load_vocabs(config)}
+            vocabs {load_vocabs(config)},
+            chunk_size {config["trainer"]["chunk_size"].as<int>(-1)}
         {
             spdlog::info("Trainer initialized; work_dir={} device = {}", work_dir, device == torch::kCUDA ? "cuda" : "cpu");
         }
@@ -129,11 +142,7 @@ namespace rtg::train {
         : Trainer(work_dir, init_config(work_dir, config_file))
         {}
 
-        ~Trainer() {
-            for (auto& vocab : vocabs) {
-                //delete vocab;
-            }
-        }
+        ~Trainer() {}
 
         auto get_train_data() -> generator<data::Batch> {
             
@@ -207,28 +216,33 @@ namespace rtg::train {
             size_t step_num = 0;
             size_t tot_sents = 0;
             size_t tot_tokens = 0;
+            const bool fp16_enabled = config["trainer"]["fp16"].as<bool>(false);
+            const int64_t pad_id = 0;
+            if (fp16_enabled) {
+                spdlog::info("FP16 training enabled");
+            }
+            nn::AnyModule projector(model->lm_head);
             for (int32_t epoch = 0; epoch < num_epochs; epoch++) {
                 auto train_data = get_train_data();
                 for (auto batch : train_data) {
+                    if (fp16_enabled){  //__enter__()
+                        at::autocast::set_enabled(true);
+                    }
                     batch = batch.to(device);
                     auto src_ids = batch.fields[0];  // [batch_size, seq_len]
                     auto tgt_ids = batch.fields[1];   // [batch_size, seq_len]
-                    auto pad_id = 0;
                     auto src_mask = (src_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
-                    auto tgt_mask = (tgt_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]   // todo: make autoregressive mask
-
+                    auto tgt_mask = (tgt_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]   //FIXME: make autoregressive mask
                     auto output = model(src_ids, tgt_ids, src_mask, tgt_mask);
-                    auto output_flat = output.view({output.size(0) * output.size(1), -1}); // [batch_size * seq_len, vocab_size]
-                    auto tgt_ids_flat = tgt_ids.view({-1}); // [batch_size * seq_len]
-                    auto loss = criterion(output_flat, tgt_ids_flat);  // [batch_size * seq_len]
-                    //exclude padding tokens from loss calculation
-                    loss.masked_fill_(tgt_ids_flat == pad_id, 0.0);
-                    long normalizer = (tgt_ids_flat != pad_id).sum().item().toInt(); // #total - #mask
-                    //assert(normalizer > 0.0);
-                    loss = loss.sum() / normalizer;
-                    //assert(!std::isnan(loss.item<float>()));
-                    
-                    loss.backward();
+                    auto normalizer = (tgt_ids != pad_id).sum().item().toInt(); // #total - #mask
+                    //auto loss = simple_loss_computer(output, tgt_ids, projector, pad_id);
+                    auto loss = loss_computer(output, tgt_ids, projector, pad_id, normalizer, Mode::TRAINING);
+
+                    if (fp16_enabled){  // __exit__()
+                        at::autocast::clear_cache();
+                        at::autocast::set_enabled(false);
+                    }
+                    //loss.backward();
                     optimizer->step();
                     scheduler->step();
                     optimizer->zero_grad();
@@ -236,13 +250,80 @@ namespace rtg::train {
                     tot_sents += src_ids.sizes()[0];
                     tot_tokens += normalizer;
                     if (step_num % 25 == 0) {
-                        cerr << "Step: " << step_num << "; loss: " << loss.item() << "; sents: " << tot_sents  << "; toks: " << tot_tokens << "\n";
-                        //assert(!torch::isnan(loss));
-                    }
+                        spdlog::info("Step: {}; loss: {:.5f}; sents: {}; toks: {}",
+                                    step_num, loss.item().toFloat(), tot_sents, tot_tokens);
+                        }
                     step_num++;
                 }
             }
         }
+
+        auto loss_computer(Tensor features, Tensor labels, nn::AnyModule projector,
+         int64_t pad_id, int64_t normalizer=-1, Mode mode=Mode::TRAINING){
+
+            if (chunk_size > 0){
+
+                return chunked_loss_computer(features, labels, projector, pad_id, chunk_size, normalizer, mode);
+            } else {
+                return simple_loss_computer(features, labels, projector, pad_id, normalizer, mode);
+            }
+         }
+
+        auto simple_loss_computer(Tensor features, Tensor labels, nn::AnyModule projector,
+         int64_t pad_id, int64_t normalizer=-1, Mode mode=Mode::TRAINING) -> Tensor{
+            auto output = projector.forward(features);
+            auto output_flat = output.view({output.size(0) * output.size(1), -1}); // [batch_size * seq_len, vocab_size]
+            auto labels_flat = labels.view({-1}); // [batch_size * seq_len]
+            Tensor loss = criterion(output_flat, labels_flat);  // [batch_size * seq_len]
+            //exclude padding tokens from loss calculation
+            loss.masked_fill_(labels_flat == pad_id, 0.0);
+            if (normalizer <= 0) { // self computed normalizer
+                normalizer = (labels_flat != pad_id).sum().item().toInt(); // #total - #mask
+            }
+            loss = loss.sum() / normalizer;
+            if (mode == Mode::TRAINING) {
+                loss.backward();
+            }
+            return loss;
+        }
+
+        auto chunked_loss_computer(Tensor features, const Tensor labels, nn::AnyModule projector,
+            const int64_t pad_id, const size_t chunk_size, const int64_t normalizer=-1, const Mode mode=Mode::TRAINING) -> Tensor{
+            /**
+             * Compute loss in chunks to avoid OOM
+             * features: [batch_size, seq_len, hidden_size]
+             * labels: [batch_size, seq_len]
+             * projector: nn::AnyModule that projects hid_size to vocab_size
+             * pad_id: labels to exclude from loss calculation
+             * chunk_size: size of chunk to use for loss computation
+             * normalizer: total number of tokens in batch. If not provided, it is computed based on pad_id
+            */
+            if (chunk_size <= 0) {
+                throw runtime_error("chunk_size must be > 0");
+            }
+            const size_t seq_len = features.size(1);
+            const auto total_chunks = ceil((1.0 * seq_len) / chunk_size);
+            Tensor total_loss = torch::tensor(0.0, torch::device(features.device()).dtype(torch::kFloat32));
+            total_loss.requires_grad_(false); // cant do backward on this loss value
+
+            // disconnect graph, accum grad across chunks, and then do backward
+            Tensor features_isolated = features.detach().clone();
+            features_isolated.requires_grad_(true);
+            for (auto chunk_idx = 0z; chunk_idx < total_chunks; chunk_idx++) {
+                auto start = chunk_idx * chunk_size;
+                auto end = min((chunk_idx + 1) * chunk_size, seq_len);
+                auto chunk_features = features_isolated.index({Slice(), Slice(start, end), Slice()}).contiguous();
+                auto chunk_labels = labels.index({Slice(), Slice(start, end)}).contiguous();
+                auto chunk_loss = simple_loss_computer(chunk_features, chunk_labels, projector, pad_id, normalizer, mode);
+                total_loss += chunk_loss.item().toFloat();
+            }
+
+            if (mode == Mode::TRAINING) {
+                features.backward(features_isolated.grad().data());
+            }
+            return total_loss;
+         }
+
     };
 
     auto parse_args(int argc, char* argv[]) -> argparse::ArgumentParser {
@@ -282,3 +363,5 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
+
+// AMP/fp16 is discussed here https://discuss.pytorch.org/t/deploy-mixed-precision-model-in-libtorch/89046/5 

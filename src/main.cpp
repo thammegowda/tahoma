@@ -1,5 +1,5 @@
 #include <iostream>
-#include "common/commons.hpp"
+#include <rtg.hpp>
 
 // rename main as trainer_main 
 #define main trainer_main
