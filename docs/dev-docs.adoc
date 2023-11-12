@@ -1,0 +1,11 @@
+= Useful Documentations for Development
+
+* C++: https://en.cppreference.com/w/
+* Cmake: https://cmake.org/cmake/help/latest/
+* Pytorch: libtorch docs:
+  * libtorch: https://pytorch.org/cppdocs/index.html 
+  * pytorch : https://pytorch.org/docs/stable/index.html
+* `fmt` format specifiers: https://fmt.dev/latest/syntax.html
+  * Note: `L` is locale specific number separator chars
+* yaml-cpp:
+* 
