@@ -6,6 +6,10 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <queue>
+#include <mutex>
+#include <thread>
+#include <condition_variable>
 
 #include <__generator.hpp>  //reference implementation of generator
 #include <torch/torch.h>
@@ -133,31 +137,24 @@ namespace rtg::data {
         return spps;
     }
 
-    struct DataLoader {
-        /**
-         * A data loader that reads data from a list of files
-         * and returns batches of data
-        */
+
+    struct DataProducer {
+        vector<string> data_paths;
+        int64_t batch_size;
         vector<std::shared_ptr<sp::SentencePieceProcessor>> vocabs;
-        config::Config config;
 
-        DataLoader(config::Config config, std::vector<std::shared_ptr<sp::SentencePieceProcessor>> vocabs)
-            : vocabs(vocabs), config(config)
-        {}
+        std::queue<data::Batch> queue;
+        size_t max_queue_size = 256;
+        size_t thread_sleep_ms = 200;  // in ms
+        std::mutex mutex;
+        std::condition_variable cv;
+        bool producer_done = false;
 
-        DataLoader(config::Config config)
-            : DataLoader(config, load_vocabs(config))
-        {}
+        DataProducer(vector<string> data_paths, int64_t batch_size,
+            vector<std::shared_ptr<sp::SentencePieceProcessor>> vocabs)
+            : data_paths(data_paths), batch_size(batch_size), vocabs(vocabs) {}
 
-        ~DataLoader() {}
-
-        auto get_train_data() -> generator<data::Batch> {
-            auto data_paths = config["trainer"]["data"].as<vector<string>>();
-            auto batch_size = config["trainer"]["batch_size"].as<int>();
-            return get_data(data_paths, batch_size);
-        }
-
-        auto get_data(vector<string> data_paths, int64_t batch_size) -> generator<data::Batch> {
+        void produce() {
             LOG::info("Loading data from {}", fmt::join(data_paths, ","));
             assert(batch_size > 0);
             const int32_t num_fields = data_paths.size();
@@ -201,20 +198,79 @@ namespace rtg::data {
                 buffer.push_back(ex);
                 rec_num++;
                 if (buffer.size() >= batch_size) {
-                    co_yield data::Batch::from_buffer(buffer);
+                    while (queue.size() >= max_queue_size) {
+                        // wait for the queue to drain
+                        std::this_thread::sleep_for(std::chrono::milliseconds(thread_sleep_ms));
+                    }
+                    //co_yield data::Batch::from_buffer(buffer);
+                    {
+                        std::unique_lock<std::mutex> lock(mutex);
+                        queue.push(data::Batch::from_buffer(buffer));
+                    }
+                    cv.notify_one();
                     buffer = vector<data::Example>();
                 }
             }
 
             if (!buffer.empty()) {
-                co_yield data::Batch::from_buffer(buffer);
+                //co_yield data::Batch::from_buffer(buffer);
+                {
+                    std::unique_lock<std::mutex> lock(mutex);
+                    queue.push(data::Batch::from_buffer(buffer));
+                }
+                cv.notify_one();
             }
             // I wish there was a finally{} block to guarantee file closure :(
             for (auto& file : files) {
                 file.close();
             }
         }
+    };
 
+    
+    struct DataLoader {  // ideally, DataGenerator but it could be confusing as synthetic data generator
+        /**
+         * A data loader that reads data from a list of files
+         * and returns batches of data
+        */
+        vector<std::shared_ptr<sp::SentencePieceProcessor>> vocabs;
+        config::Config config;
+
+        DataLoader(config::Config config, std::vector<std::shared_ptr<sp::SentencePieceProcessor>> vocabs)
+            : vocabs(vocabs), config(config)
+        {}
+
+        DataLoader(config::Config config)
+            : DataLoader(config, load_vocabs(config))
+        {}
+
+        ~DataLoader() {}
+
+        auto get_train_data() -> generator<data::Batch> {
+            auto data_paths = config["trainer"]["data"].as<vector<string>>();
+            auto batch_size = config["trainer"]["batch_size"].as<int>();
+            return get_data(data_paths, batch_size);
+        }
+
+        auto get_data(vector<string> data_paths, int64_t batch_size) -> generator<data::Batch> {
+
+            DataProducer producer(data_paths, batch_size, vocabs);
+            std::thread producer_thread(&DataProducer::produce, &producer);
+            //producer_thread.detach();
+            // read from queue and co_yield
+            while (true) {
+                std::unique_lock<std::mutex> lock(producer.mutex);
+                producer.cv.wait(lock, [&producer] {return !producer.queue.empty() || producer.producer_done; });
+                if (producer.queue.empty() && producer.producer_done) {
+                    break;
+                }
+                auto batch = producer.queue.front();
+                producer.queue.pop();
+                lock.unlock();
+                co_yield batch;
+            }
+            producer_thread.join();
+        }
     };
 
 }
