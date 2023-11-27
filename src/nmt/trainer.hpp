@@ -3,6 +3,7 @@
 #include <coroutine>
 #include <ranges>
 #include <memory>
+#include <chrono>
 #include <__generator.hpp>  //reference implementation of generator
 #include <argparse.hpp>
 
@@ -143,6 +144,7 @@ namespace rtg::train {
             size_t step_num = 0;
             size_t tot_sents = 0;
             size_t tot_tokens = 0;
+            auto start_time = std::chrono::high_resolution_clock::now();
             const bool fp16_enabled = config["trainer"]["fp16"].as<bool>(false);
             const int64_t pad_id = 0;
             if (fp16_enabled) {
@@ -152,6 +154,7 @@ namespace rtg::train {
             for (int32_t epoch = 0; epoch < num_epochs; epoch++) {
                 auto train_data = data_loader.get_train_data();
                 for (auto batch : train_data) {
+                    batch.contiguous();
                     if (fp16_enabled) {  //__enter__()
                         at::autocast::set_enabled(true);
                     }
@@ -162,9 +165,9 @@ namespace rtg::train {
                     auto tgt_mask_padding = (tgt_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len] 
                     auto tgt_mask_autoreg = subsequent_mask(tgt_ids.size(1), device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len] 
                     auto tgt_mask = tgt_mask_padding | tgt_mask_autoreg.type_as(tgt_mask_padding); // [batch_size, 1, seq_len, seq_len]
-                    auto output = model(src_ids, tgt_ids, src_mask, tgt_mask);
                     auto normalizer = (tgt_ids != pad_id).sum().item().toInt(); // #total - #mask
-                    //auto loss = simple_loss_computer(output, tgt_ids, projector, pad_id);
+                    auto output = model(src_ids, tgt_ids, src_mask, tgt_mask);
+                    
                     auto loss = loss_computer(output, tgt_ids, projector, pad_id, normalizer, Mode::TRAINING);
 
                     if (fp16_enabled) {  // __exit__()
@@ -175,14 +178,19 @@ namespace rtg::train {
                     optimizer->step();
                     scheduler->step();
                     optimizer->zero_grad();
-
+                    //auto loss = torch::tensor(0.0, torch::device(device).dtype(torch::kFloat32));
                     tot_sents += src_ids.sizes()[0];
                     tot_tokens += normalizer;
                     if (step_num % 25 == 0) {
-                        spdlog::info("Step: {}; loss: {:.5f}; sents: {}; toks: {}",
-                            step_num, loss.item().toFloat(), tot_sents, tot_tokens);
+                        auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::high_resolution_clock::now() - start_time);
+                        auto toks_rate = 1000.0f * tot_tokens / duration_ms.count() ;
+                        auto sents_rate = 1000.0f * tot_sents / duration_ms.count();
+                        spdlog::info("Step: {}; loss: {:.5f}; sents: {}; toks: {}, speed: {:.1f} tok/s {:.1f} sent/s", 
+                            step_num, loss.item().toFloat(), tot_sents, tot_tokens, toks_rate, sents_rate);
                     }
                     step_num++;
+                    batch.fields.clear(); // clear references to tensors
+                    //delete &batch;
                 }
             }
         }
@@ -191,10 +199,8 @@ namespace rtg::train {
             int64_t pad_id, int64_t normalizer = -1, Mode mode = Mode::TRAINING) {
 
             if (chunk_size > 0) {
-
                 return chunked_loss_computer(features, labels, projector, pad_id, chunk_size, normalizer, mode);
-            }
-            else {
+            } else {
                 return simple_loss_computer(features, labels, projector, pad_id, normalizer, mode);
             }
         }
@@ -203,7 +209,7 @@ namespace rtg::train {
             int64_t pad_id, int64_t normalizer = -1, Mode mode = Mode::TRAINING) -> Tensor {
             auto output = projector.forward(features);
             auto output_flat = output.view({ output.size(0) * output.size(1), -1 }); // [batch_size * seq_len, vocab_size]
-            auto labels_flat = labels.view({ -1 }); // [batch_size * seq_len]
+            auto labels_flat = labels.reshape({ -1 }); // [batch_size * seq_len]
             Tensor loss = criterion(output_flat, labels_flat);  // [batch_size * seq_len]
             //exclude padding tokens from loss calculation
             loss.masked_fill_(labels_flat == pad_id, 0.0);
@@ -218,7 +224,8 @@ namespace rtg::train {
         }
 
         auto chunked_loss_computer(Tensor features, const Tensor labels, nn::AnyModule projector,
-            const int64_t pad_id, const size_t chunk_size, const int64_t normalizer = -1, const Mode mode = Mode::TRAINING) -> Tensor {
+            const int64_t pad_id, const size_t chunk_size, const int64_t normalizer = -1,
+            const Mode mode = Mode::TRAINING) -> Tensor {
             /**
              * Compute loss in chunks to avoid OOM
              * features: [batch_size, seq_len, hidden_size]
@@ -236,14 +243,14 @@ namespace rtg::train {
             Tensor total_loss = torch::tensor(0.0, torch::device(features.device()).dtype(torch::kFloat32));
             total_loss.requires_grad_(false); // cant do backward on this loss value
 
-            // disconnect graph, accum grad across chunks, and then do backward
+            // disconnect graph, ulate grad across chunks, and then do backward
             Tensor features_isolated = features.detach().clone();
             features_isolated.requires_grad_(true);
             for (auto chunk_idx = 0z; chunk_idx < total_chunks; chunk_idx++) {
                 auto start = chunk_idx * chunk_size;
                 auto end = min((chunk_idx + 1) * chunk_size, seq_len);
-                auto chunk_features = features_isolated.index({ Slice(), Slice(start, end), Slice() }).contiguous();
-                auto chunk_labels = labels.index({ Slice(), Slice(start, end) }).contiguous();
+                auto chunk_features = features_isolated.index({ Slice(), Slice(start, end), Slice() });
+                auto chunk_labels = labels.index({ Slice(), Slice(start, end) });
                 auto chunk_loss = simple_loss_computer(chunk_features, chunk_labels, projector, pad_id, normalizer, mode);
                 total_loss += chunk_loss.item().toFloat();
             }
@@ -253,7 +260,6 @@ namespace rtg::train {
             }
             return total_loss;
         }
-
     };
 
     auto parse_args(int argc, char* argv[]) -> argparse::ArgumentParser {

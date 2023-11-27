@@ -48,15 +48,6 @@ namespace rtg::nmt::transformer {
             x = dropout(x);
             return x;
         }
-
-        /*
-        auto to(torch::Device& device) -> PositionEmbeddingImpl& {
-            embedding->to(device);
-            this->positions = positions.to(device);
-            return *this;
-        }
-        */
-
     };
     TORCH_MODULE(PositionEmbedding);
 

@@ -5,7 +5,7 @@ model:
     src_vocab_size: 8000
     tgt_vocab_size: 8000
     encoder_layers: 6
-    decoder_layers: 3
+    decoder_layers: 6
     attn_head: 8
     ffn_dim: 2048
     dropout: 0.1
@@ -32,14 +32,15 @@ trainer:
   data:
     - data/train.kan
     - data/train.eng
-  batch_size: 2
+  batch_size: 24
   epochs: 25
   max_length:
-    - 80
-    - 80
+    - 512
+    - 512
   max_length_crop: true
-  fp16: false
-  chunk_size: 4
+  fp16: true
+  chunk_size: 8
+  loader_threads: 1
 
 validator:
   data:
@@ -47,6 +48,6 @@ validator:
     - data/dev.eng
   batch_size: 64
   max_length:
-    - 200
-    - 200
+    - 512
+    - 512
   max_length_crop: true
