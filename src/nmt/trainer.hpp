@@ -16,16 +16,16 @@
 #include "../common/data.hpp"
 #include "../nmt/transformer.hpp"
 
-
 namespace nn = torch::nn;
 namespace optim = torch::optim;
 namespace sp = sentencepiece;
 namespace fs = std::filesystem;
 
+
 using namespace std;
 using namespace torch::indexing;
 using namespace rtg;
-
+using namespace chrono;
 
 namespace rtg::train {
 
@@ -40,10 +40,8 @@ namespace rtg::train {
         if (model_type == "transformer") {
             YAML::Node model_args = config["model"]["args"];
             auto model = nmt::transformer::TransformerNMT(model_args);
-            //model->to(device);
             return model;
-        }
-        else {
+        } else {
             throw runtime_error("Unknown model type " + model_type);
         }
     }
@@ -58,11 +56,32 @@ namespace rtg::train {
         -> std::shared_ptr<optim::Optimizer> {
         auto optim_config = config["optimizer"];
         auto optim_name = optim_config["name"].as<string>();
-        return std::make_shared<optim::Adam>(model->parameters(), optim::AdamOptions(0.0001));
+        if (optim_name == "adam") {
+            auto options = optim::AdamOptions(optim_config["lr"].as<double>(0.0001));
+            if (optim_config["weight_decay"].IsDefined()) {
+                options.weight_decay(optim_config["weight_decay"].as<double>());
+            }
+            if (optim_config["betas"].IsDefined()) {
+                auto betas = optim_config["betas"].as<vector<double>>();
+                options.betas({ betas[0], betas[1] });
+            }
+            if (optim_config["eps"].IsDefined()) {
+                options.eps(optim_config["eps"].as<double>());
+            }
+            if (optim_config["amsgrad"].IsDefined()) {
+                options.amsgrad(optim_config["amsgrad"].as<bool>());
+            }
+            LOG::info("Optimizer {}", optim_name);
+            return std::make_shared<optim::Adam>(model->parameters(), options);
+        } else {
+            throw runtime_error("Unknown or unsupported optimizer " + optim_name);
+        }
     }
 
     auto init_scheduler(const config::Config& config, optim::Optimizer& optimizer)
         -> std::shared_ptr<optim::LRScheduler> {
+        auto scheduler_config = config["scheduler"];
+        auto scheduler_name = scheduler_config["name"].as<string>();
         return std::make_shared<optim::StepLR>(optimizer, 1.0, 0.95);
     }
 
@@ -90,6 +109,152 @@ namespace rtg::train {
         return config::Config(config_file);
     }
 
+
+    struct StatsCounter {
+        int64_t step_num = 0;
+        int64_t tot_sents = 0;
+        int64_t tot_tokens = 0;
+        double tot_loss = 0.0;
+
+        string log_frequency = "";
+        int64_t log_frequency_step = -1;
+        int64_t log_frequency_tokens = -1;
+        int64_t log_frequency_time_sec = -1;
+
+        int64_t last_log_step = 0;
+        int64_t last_log_tokens = 0;
+        chrono::time_point<chrono::high_resolution_clock> last_log_time = chrono::high_resolution_clock::now();
+        chrono::time_point<chrono::high_resolution_clock> start_time = chrono::high_resolution_clock::now();
+
+
+        auto set_log_frequency(string arg){
+            /*
+             arg should be an integer with a suffix
+            suffix u =>  number of steps i.e updates
+            suffix t => number of tokens
+            the second last character is k,M,B (optional), then it is interpreted as kilo, million, billion 
+            suffix s,m,h =>  number of seconds, minutes, hours 
+            */
+            log_frequency = arg;
+            assert(arg.size() > 0);
+            auto suffix = arg.back();
+            auto num = arg.substr(0, arg.size() - 1);
+            int64_t scaler = 1;
+            // check if the second last character is k,M,B
+            if (suffix == 'u' || suffix == 't'){
+                switch (num.size() > 0 ? num[num.size() - 1] : '?') {
+                    case 'k':  // proper
+                    case 'K': // typo
+                        scaler = 1'000; 
+                        break;
+                    case 'M': // proper
+                        scaler = 1'000'000; 
+                        break;
+                    case 'B': // proper
+                    case 'G': // okay
+                        scaler = 1'000'000'000;
+                        break;
+                }
+                if (scaler > 1) {
+                    num = num.substr(0, num.size() - 1);
+                }
+            }
+
+            size_t num_val = std::stoi(num);
+            switch (suffix) {
+                case 'u': // updates
+                    log_frequency_step = scaler * num_val;
+                    break;
+                  case 't': // tokens
+                    log_frequency_tokens = scaler * num_val;
+                    break;
+                case 's': // seconds
+                    log_frequency_time_sec =  num_val;
+                    break;
+                case 'm': // minutes
+                    log_frequency_time_sec = num_val * 60;
+                    break;
+                case 'h': // hours
+                    log_frequency_time_sec = num_val * 60 * 60;
+                    break;
+                default:
+                    throw runtime_error(fmt::format("Invalid log frequency argument {}", arg));
+            }
+        }
+
+        // add constructor
+        StatsCounter() {}
+        StatsCounter(string log_frequency) {
+            set_log_frequency(log_frequency);
+        }
+
+        // copy and move
+        StatsCounter(const StatsCounter& other) = default;
+        StatsCounter(StatsCounter&& other) = default;
+        StatsCounter& operator=(const StatsCounter& other) = default;
+        StatsCounter& operator=(StatsCounter&& other) = default;
+        
+        double avg_loss() {
+            return step_num > 0 ? tot_loss / step_num : 0.0;
+        }
+
+        auto update(double loss, size_t num_sents, size_t num_tokens, size_t num_steps=1) -> StatsCounter& {
+            tot_sents += num_sents;
+            tot_tokens += num_tokens;
+            step_num += num_steps;
+            tot_loss += loss;
+            bool log_now = false;
+            if (log_frequency_step > 0 && step_num - last_log_step >= log_frequency_step) {
+                log_now = true;
+                last_log_step = step_num;
+            } else if (log_frequency_tokens > 0 && num_tokens - last_log_tokens >= log_frequency_tokens) {
+                log_now = true;
+                last_log_tokens = num_tokens;
+            } else if (log_frequency_time_sec > 0 && 
+                chrono::duration_cast<chrono::seconds>(chrono::high_resolution_clock::now() - last_log_time).count() >= log_frequency_time_sec) {
+                log_now = true;
+                last_log_time = chrono::high_resolution_clock::now();
+            }
+            if (log_now) {
+                auto duration_ms = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start_time);
+                auto toks_rate = 1000.0f * tot_tokens / duration_ms.count() ;
+                auto sents_rate = 1000.0f * tot_sents / duration_ms.count();
+                spdlog::info("Step: {}; Loss: {:.5f}; AvgLoss: {:.5f}; sents: {}; toks: {}, speed: {:.1f} tok/s {:.1f} sent/s", 
+                    step_num, loss, avg_loss(),  tot_sents, tot_tokens, toks_rate, sents_rate);
+            }
+            return *this;
+        }
+    };
+
+
+     struct Stopper {
+        int64_t patience = 10;
+        int64_t num_stalls = 0;
+        double best_loss = numeric_limits<double>::infinity();
+        Stopper(int64_t patience) : patience{ patience } {}
+
+        int stop(double loss) {
+            /*
+                -1 => no stop; continue training
+                0 => new best loss; maybe take a checkpoint
+                1 => stop training; we have exhausted patience
+            */
+            if (loss <= best_loss) {
+                best_loss = loss;
+                num_stalls = 0;
+                spdlog::info("New best loss: {:.5f}", loss);
+                return 0;
+            } else {
+                num_stalls++;
+                spdlog::info("No improvement in last {} validations; patience={}; best={:.5f}; current={:.5f}", num_stalls, patience, best_loss, loss);
+                return num_stalls >= patience ? 1 : -1; 
+            }
+            return num_stalls >= patience;
+            
+        }
+    };
+
+
     template <typename M, typename C>
     class Trainer {
     protected:
@@ -97,24 +262,32 @@ namespace rtg::train {
         config::Config config;
         M model;
         C criterion;
+        nn::AnyModule projector;
         std::shared_ptr<optim::Optimizer> optimizer;
         std::shared_ptr<optim::LRScheduler> scheduler;
         rtg::data::DataLoader data_loader;
-        torch::Device device{ torch::cuda::is_available() ? "cuda" : "cpu" };
         int32_t chunk_size;
-    public:
+        bool fp16_enabled;
+        int64_t pad_id = 0;
+        int64_t bos_id = 1;
+        torch::Device device{ torch::cuda::is_available() ? "cuda" : "cpu" };
 
+    public:
         Trainer(fs::path work_dir, config::Config conf)
             : work_dir{ work_dir },
             config{ conf },
             model{ init_model<M>(config, device) },
             criterion{ init_criterion<C>(config) },
+            projector{ model->lm_head },
             optimizer{ init_optimizer(config, model) },
             scheduler{ init_scheduler(config, *optimizer) },
             data_loader{ rtg::data::DataLoader(config) },
-            chunk_size{ config["trainer"]["chunk_size"].as<int>(-1) }
+            chunk_size{ config["trainer"]["chunk_size"].as<int>(-1) },
+            fp16_enabled{ config["trainer"]["fp16"].as<bool>(false) },
+            pad_id {data_loader.vocabs[1]->pad_id()},   //vocabs[1] is the target vocab
+            bos_id {data_loader.vocabs[1]->bos_id()}
         {
-            spdlog::info("Trainer initialized; work_dir={} device = {}", work_dir, device == torch::kCUDA ? "cuda" : "cpu");
+            spdlog::info("Trainer initialized; work_dir={} device={}; fp16={}", work_dir, device == torch::kCUDA ? "cuda" : "cpu", fp16_enabled);
         }
 
         Trainer(fs::path work_dir, fs::path config_file)
@@ -122,7 +295,6 @@ namespace rtg::train {
         {}
 
         ~Trainer() {}
-
 
         auto subsequent_mask(int64_t seq_len, torch::Device device = torch::kCPU) -> Tensor {
             // batch: [batch_size, seq_len]
@@ -133,68 +305,105 @@ namespace rtg::train {
             return mask;
         }
 
-        void train() {
-            size_t num_epochs = config["trainer"]["epochs"].as<int>();
-            auto model = this->model;
-            model->train();
-            model->to(device);
-            LOG::info("Moving to device {}", device == torch::kCUDA ? "cuda" : "cpu");
+        auto save_checkpoint(string tag = "") {
+            auto filename = fmt::format("model{}.pt", tag.size() > 0 ? "." + tag : "");
+            auto checkpoint_file = work_dir / filename;
+            spdlog::info("Saving checkpoint to {}", checkpoint_file);
+            torch::save(model, checkpoint_file.string());
+            spdlog::info("Checkpoint saved");
+        }
 
-            spdlog::info("Training started; total epochs = {}", num_epochs);
-            size_t step_num = 0;
-            size_t tot_sents = 0;
-            size_t tot_tokens = 0;
-            auto start_time = std::chrono::high_resolution_clock::now();
-            const bool fp16_enabled = config["trainer"]["fp16"].as<bool>(false);
-            const int64_t pad_id = 0;
-            if (fp16_enabled) {
-                spdlog::info("FP16 training enabled");
+        auto step(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Tensor {
+             if (fp16_enabled) {  //__enter__()
+                at::autocast::set_enabled(true);
             }
-            nn::AnyModule projector(model->lm_head);
-            for (int32_t epoch = 0; epoch < num_epochs; epoch++) {
-                auto train_data = data_loader.get_train_data();
-                for (auto batch : train_data) {
-                    batch.contiguous();
-                    if (fp16_enabled) {  //__enter__()
-                        at::autocast::set_enabled(true);
-                    }
-                    batch = batch.to(device);
-                    auto src_ids = batch.fields[0];  // [batch_size, seq_len]
-                    auto tgt_ids = batch.fields[1];   // [batch_size, seq_len]
-                    auto src_mask = (src_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
-                    auto tgt_mask_padding = (tgt_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len] 
-                    auto tgt_mask_autoreg = subsequent_mask(tgt_ids.size(1), device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len] 
-                    auto tgt_mask = tgt_mask_padding | tgt_mask_autoreg.type_as(tgt_mask_padding); // [batch_size, 1, seq_len, seq_len]
-                    auto normalizer = (tgt_ids != pad_id).sum().item().toInt(); // #total - #mask
-                    auto output = model(src_ids, tgt_ids, src_mask, tgt_mask);
-                    
-                    auto loss = loss_computer(output, tgt_ids, projector, pad_id, normalizer, Mode::TRAINING);
+            batch.contiguous();
+            batch = batch.to(device);
+            auto src_ids = batch.fields[0];  // [batch_size, seq_len]
+            auto tgt_ids = batch.fields[1];   // [batch_size, seq_len]
+            //FIME: add bos and eos tokens to tgt_ids. Offset tgt_ids by 1
+            auto _bos_col = torch::full({ tgt_ids.size(0), 1 }, bos_id, torch::dtype(torch::kInt64).device(device));
+            tgt_ids = torch::cat({_bos_col, tgt_ids}, 1);
+            
+            auto src_mask = (src_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
+            auto tgt_mask_padding = (tgt_ids == pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len] 
+            auto tgt_mask_autoreg = subsequent_mask(tgt_ids.size(1), device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len] 
+            auto tgt_mask = tgt_mask_padding | tgt_mask_autoreg.type_as(tgt_mask_padding); // [batch_size, 1, seq_len, seq_len]
+            auto normalizer = (tgt_ids != pad_id).sum().item().toInt(); // #total - #mask
+            auto output = model(src_ids, tgt_ids, src_mask, tgt_mask);
+            auto loss = loss_computer(output, tgt_ids, projector, pad_id, normalizer, mode);
+            stats.update(loss.item().toDouble(), tgt_ids.size(0), normalizer);
 
-                    if (fp16_enabled) {  // __exit__()
-                        at::autocast::clear_cache();
-                        at::autocast::set_enabled(false);
-                    }
-                    //loss.backward();
-                    optimizer->step();
-                    scheduler->step();
-                    optimizer->zero_grad();
-                    //auto loss = torch::tensor(0.0, torch::device(device).dtype(torch::kFloat32));
-                    tot_sents += src_ids.sizes()[0];
-                    tot_tokens += normalizer;
-                    if (step_num % 25 == 0) {
-                        auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::high_resolution_clock::now() - start_time);
-                        auto toks_rate = 1000.0f * tot_tokens / duration_ms.count() ;
-                        auto sents_rate = 1000.0f * tot_sents / duration_ms.count();
-                        spdlog::info("Step: {}; loss: {:.5f}; sents: {}; toks: {}, speed: {:.1f} tok/s {:.1f} sent/s", 
-                            step_num, loss.item().toFloat(), tot_sents, tot_tokens, toks_rate, sents_rate);
-                    }
-                    step_num++;
+            if (fp16_enabled) {  // __exit__()
+                at::autocast::clear_cache();
+                at::autocast::set_enabled(false);
+            }
+            if (mode == Mode::TRAINING){
+                optimizer->step();
+                scheduler->step();
+                optimizer->zero_grad();
+            }
+            return loss;
+        }
+
+       
+        void train() {
+            LOG::info("Moving to device {}", device == torch::kCUDA ? "cuda" : "cpu");
+            model->to(device);
+            size_t num_epochs = config["trainer"]["epochs"].as<int>();
+            auto log_frequency = config["trainer"]["log_frequency"].as<string>("25u");
+            auto checkpoint_frequency = config["checkpoint"]["frequency"].as<size_t>(1000);
+            auto validation_frequency = config["validator"]["frequency"].as<size_t>(1000);
+            spdlog::info("Training started; total epochs = {}; log_frequency={}", num_epochs, log_frequency);
+            model->train();
+
+            Stopper stopper(config["trainer"]["early_stopping"].as<int>(8));
+
+            for (int32_t epoch = 0; epoch < num_epochs; epoch++) {
+                auto stats = StatsCounter(log_frequency);
+                for (auto batch : data_loader.get_train_data()) {
+                    step(batch, stats, Mode::TRAINING);
                     batch.fields.clear(); // clear references to tensors
-                    //delete &batch;
+
+                    if (stats.step_num % validation_frequency == 0) {
+                        {
+                            torch::AutoGradMode enable_grad(false);
+                            model->eval();
+                            auto valid_loss = validate();
+                            switch (stopper.stop(valid_loss)) {
+                                case 0: // new best loss
+                                    save_checkpoint("best");
+                                    break;  
+                                case 1: // stop training
+                                    LOG::info("Early stopping at epoch {} step {}", epoch, stats.step_num);
+                                    return;
+                                case -1: // continue training
+                                    break;
+                                default:
+                                    throw runtime_error("Invalid stopper return value");
+                            }
+                        }
+                        model->train();
+                    }
+                    if (stats.step_num % checkpoint_frequency == 0) {
+                        save_checkpoint(fmt::format("step.{}", stats.step_num));
+                    }
                 }
+                // todo validation
             }
         }
 
+        auto validate(){
+            auto stats = StatsCounter(config["trainer"]["log_frequency"].as<string>("25u"));
+            LOG::info("Starting validation. log_frequency={}", stats.log_frequency);
+            for (auto batch :  data_loader.get_validation_data()) {
+                step(batch, stats, Mode::INFERENCE);
+            }
+            LOG::info("Validation finished. Avg loss: {:.5f}", stats.avg_loss());
+            return stats.avg_loss();
+        }
+
+    
         auto loss_computer(Tensor features, Tensor labels, nn::AnyModule projector,
             int64_t pad_id, int64_t normalizer = -1, Mode mode = Mode::TRAINING) {
 
@@ -279,10 +488,11 @@ namespace rtg::train {
         }
         return parser;
     }
-}
+} 
 
 
 int main(int argc, char* argv[]) {
+    spdlog::info("main started.. torch version: {} ", TORCH_VERSION);
     auto args = train::parse_args(argc, argv);
     if (args.get<bool>("verbose")) {
         spdlog::set_level(spdlog::level::debug);

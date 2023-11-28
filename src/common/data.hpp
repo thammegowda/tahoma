@@ -157,7 +157,6 @@ namespace rtg::data {
     }
 
 
-
     struct DataLoader {  // ideally, DataGenerator but it could be confusing as synthetic data generator
         /**
          * A data loader that reads data from a list of files
@@ -169,7 +168,6 @@ namespace rtg::data {
         DataLoader(config::Config config, std::vector<std::shared_ptr<sp::SentencePieceProcessor>> vocabs)
             : vocabs(vocabs), config(config)
         {
-
         }
 
         DataLoader(config::Config config)
@@ -178,7 +176,8 @@ namespace rtg::data {
 
         ~DataLoader() {}
 
-        auto read_examples(vector<string> data_paths, vector<size_t> max_length, bool max_length_crop=true) -> std::generator<data::Example> {
+        auto read_examples(vector<string> data_paths, vector<size_t> max_length,
+                bool max_length_crop=true) -> std::generator<data::Example> {
             LOG::info("Loading data from {}", fmt::join(data_paths, ","));
             if (data_paths.empty()) {
                 throw runtime_error("No data files specified");
@@ -187,7 +186,7 @@ namespace rtg::data {
                 if(max_length.size() != data_paths.size()) {
                     throw runtime_error("max_length must be of the same size as data_paths");
                 }
-                LOG::info("Length cropping is enabled. max_length: {}", fmt::join(max_length, ","));
+                LOG::info("Length cropping is enabled. max_length: {}", fmt::join(max_length, ", "));
             } else {
                 LOG::info("Length cropping is disabled. Currently long examples are NOT skipped and hence may cause OOM");
             }
@@ -208,11 +207,10 @@ namespace rtg::data {
             do {
                 fields = vector<string>(num_fields);
                 field_ids = vector<vector<int32_t>>(num_fields);
-
                 for (size_t i = 0; i < num_fields; i++) {
                     if (!getline(files[i], fields[i]) || fields[i].empty()) {
                         has_data = false;
-                        spdlog::warn("file {} has no more data or there are empty rows. Stopping", data_paths[i]);
+                        spdlog::warn("file {} has no more data or there are empty rows. Stopping after {} lines", data_paths[i], rec_num+1);
                         break;
                     }
                 }
@@ -273,14 +271,18 @@ namespace rtg::data {
             }
         }
 
-        auto get_data_sync(string dataset_name) -> std::generator<data::Batch> {
-            auto data_paths = config[dataset_name]["data"].as<vector<string>>();
-            auto batch_size = config[dataset_name]["batch_size"].as<int>();
-            auto max_length_crop = config[dataset_name]["max_length_crop"].as<bool>(true);
-            auto max_length = config[dataset_name]["max_length"].as<vector<size_t>>();
+        auto get_validation_data() -> generator<data::Batch> {
+            return get_data_sync("validator", "trainer");
+        }
 
-            return make_batches(read_examples(data_paths, max_length, max_length_crop),
-                 batch_size);
+        auto get_data_sync(string dataset_name, string fallback_name="trainer") -> std::generator<data::Batch> {
+            auto data_paths = config[dataset_name]["data"].as<vector<string>>();
+
+            // try to locate bacth_size in the dataset_name, else fallback to trainer 
+            auto batch_size = config[dataset_name]["batch_size"].as<int>(config[fallback_name]["batch_size"].as<int>());
+            auto max_length_crop = config[dataset_name]["max_length_crop"].as<bool>(config[fallback_name]["max_length_crop"].as<bool>(true));
+            auto max_length = config[dataset_name]["max_length"].as<vector<size_t>>(config[fallback_name]["max_length"].as<vector<size_t>>());
+            return make_batches(read_examples(data_paths, max_length, max_length_crop), batch_size);
         }
 
         auto get_data_async(string dataset_name) -> generator<data::Batch> {
