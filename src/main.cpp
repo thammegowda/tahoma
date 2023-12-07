@@ -3,7 +3,7 @@
 
 // rename main as trainer_main 
 #define main trainer_main
-#include "nmt/trainer.hpp"
+#include "train/trainer.hpp"
 #undef main
 
 

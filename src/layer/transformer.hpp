@@ -1,4 +1,5 @@
 #pragma once
+
 #include <tuple>
 #include <cmath>
 #include <iostream>
@@ -15,14 +16,15 @@ using namespace rtg;
 using namespace torch::indexing;
 
 
-namespace rtg::nmt::transformer {
+namespace rtg::layer {
 
-    struct PositionEmbeddingImpl : nn::Module {
+    // TODO: split this into a separate file, also separate position+word embeddings
+    struct AbsolutePositionEmbeddingImpl : nn::Module {
         nn::Embedding embedding;
         torch::Tensor positions;
         nn::Dropout dropout;
 
-        PositionEmbeddingImpl(int vocab_size, int model_dim, double dropout = 0.1, const int max_len = 5000) :
+        AbsolutePositionEmbeddingImpl(int vocab_size, int model_dim, double dropout = 0.1, const int max_len = 5000) :
             embedding{ register_module("embedding", nn::Embedding(nn::EmbeddingOptions(vocab_size, model_dim))) },
             dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
             positions{ torch::zeros({1, max_len, model_dim}, torch::requires_grad(false)) }
@@ -49,7 +51,7 @@ namespace rtg::nmt::transformer {
             return x;
         }
     };
-    TORCH_MODULE(PositionEmbedding);
+    TORCH_MODULE(AbsolutePositionEmbedding);
 
 
     struct MultiheadAttentionImpl: public nn::Module {
@@ -119,7 +121,7 @@ namespace rtg::nmt::transformer {
     TORCH_MODULE(MultiheadAttention);
     
 
-    struct EncoderLayerImpl : public nn::Module {
+    struct TransformerEncoderLayerImpl : public nn::Module {
         MultiheadAttention self_attn;
         nn::Linear fc1;
         nn::Linear fc2;
@@ -128,7 +130,7 @@ namespace rtg::nmt::transformer {
         nn::Dropout dropout1;
         nn::Dropout dropout2;
 
-        EncoderLayerImpl(int model_dim, int nhead, double dropout = 0.1) :
+        TransformerEncoderLayerImpl(int model_dim, int nhead, double dropout = 0.1) :
             self_attn{
                 (assert(model_dim > 0), assert(nhead > 0), assert(model_dim % nhead == 0),
                 register_module("self_attn", MultiheadAttention(model_dim, nhead, dropout)))
@@ -158,11 +160,11 @@ namespace rtg::nmt::transformer {
             return src;
         }
     };
-    TORCH_MODULE(EncoderLayer);
+    TORCH_MODULE(TransformerEncoderLayer);
 
 
-    struct EncoderImpl : public nn::Module {
-        PositionEmbedding position_embedding = nullptr;
+    struct TransformerEncoderImpl : public nn::Module {
+        AbsolutePositionEmbedding position_embedding = nullptr;
         nn::LayerNorm norm1;
         nn::Dropout dropout;
         int num_layers;
@@ -171,14 +173,14 @@ namespace rtg::nmt::transformer {
         static nn::ModuleList make_layers(int model_dim, int nhead, int num_layers, double dropout = 0.1) {
             auto layers = nn::ModuleList(); 
             for (int i = 0; i < num_layers; ++i) {
-                layers->push_back(EncoderLayer(model_dim, nhead, dropout));
+                layers->push_back(TransformerEncoderLayer(model_dim, nhead, dropout));
             }
             return layers;
         }
 
-        EncoderImpl(int vocab_size, int model_dim, int nhead, int num_layers, double dropout = 0.1) :
+        TransformerEncoderImpl(int vocab_size, int model_dim, int nhead, int num_layers, double dropout = 0.1) :
             //embedding{ register_module("embedding", nn::Embedding(nn::EmbeddingOptions(vocab_size, model_dim))) },
-            position_embedding{ register_module("position_embedding", PositionEmbedding(vocab_size, model_dim, dropout)) },
+            position_embedding{ register_module("position_embedding", AbsolutePositionEmbedding(vocab_size, model_dim, dropout)) },
             norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
             dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
             layers{ register_module("layers", make_layers(model_dim, nhead, num_layers, dropout))},
@@ -197,16 +199,16 @@ namespace rtg::nmt::transformer {
             x = norm1(x);
 
             for (int i = 0; i < num_layers; ++i) {
-                auto layer = layers->at<EncoderLayerImpl>(i);
+                auto layer = layers->at<TransformerEncoderLayerImpl>(i);
                 x = layer.forward(x, src_mask);
             }
             return x;
         }
     };
-    TORCH_MODULE(Encoder);
+    TORCH_MODULE(TransformerEncoder);
 
 
-    struct DecoderLayerImpl : public nn::Module {
+    struct TransformerDecoderLayerImpl : public nn::Module {
 
         MultiheadAttention self_attn;
         MultiheadAttention src_attn;
@@ -221,7 +223,7 @@ namespace rtg::nmt::transformer {
         nn::Dropout dropout2;
         nn::Dropout dropout3;
 
-        DecoderLayerImpl(int model_dim, int nhead, double dropout = 0.1) :
+        TransformerDecoderLayerImpl(int model_dim, int nhead, double dropout = 0.1) :
             self_attn {( 
                 assert(model_dim > 0), 
                 assert(nhead > 0),
@@ -262,32 +264,32 @@ namespace rtg::nmt::transformer {
             return x;
         }
     };
-    TORCH_MODULE(DecoderLayer);
+    TORCH_MODULE(TransformerDecoderLayer);
 
-    struct DecoderImpl: public nn::Module {
+    struct TransformerDecoderImpl: public nn::Module {
         int num_layers;
         int model_dim;
         int nhead;
 
-        PositionEmbedding position_embedding;
+        AbsolutePositionEmbedding position_embedding;
         nn::LayerNorm norm1;
         nn::Dropout dropout;
         nn::ModuleList layers;
 
-        DecoderImpl(int vocab_size, int model_dim, int nhead, int num_layers, double dropout = 0.1) :
+        TransformerDecoderImpl(int vocab_size, int model_dim, int nhead, int num_layers, double dropout = 0.1) :
             model_dim {( assert(model_dim > 0),  model_dim )},
             num_layers {( assert(num_layers > 0), num_layers )},
             nhead {( assert(nhead >0), assert(model_dim % nhead == 0),  nhead )},
             position_embedding{( 
                 assert(vocab_size > 0), assert(model_dim > 0),
-                register_module("position_embedding", PositionEmbedding(vocab_size, model_dim, dropout)) 
+                register_module("position_embedding", AbsolutePositionEmbedding(vocab_size, model_dim, dropout)) 
                 )},
             norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
             dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
             layers{ register_module("layers", nn::ModuleList()) }
         {
             for (int i = 0; i < num_layers; ++i) {
-                layers->push_back(DecoderLayer(model_dim, nhead, dropout));
+                layers->push_back(TransformerDecoderLayer(model_dim, nhead, dropout));
             }
         }
 
@@ -305,59 +307,13 @@ namespace rtg::nmt::transformer {
             x = norm1(x);
 
             for (int i = 0; i < num_layers; ++i) {
-                x = layers->at<DecoderLayerImpl>(i).forward(x, memory, tgt_mask, memory_mask);
+                x = layers->at<TransformerDecoderLayerImpl>(i).forward(x, memory, tgt_mask, memory_mask);
             }
             //x = lm_head(x); // [batch_size, tgt_len, vocab_size]
             return x;
         }
     };
-    TORCH_MODULE(Decoder);
+    TORCH_MODULE(TransformerDecoder);
 
-
-    struct TransformerNMTImpl : public nn::Module {
-        int src_vocab_size;
-        int tgt_vocab_size;
-        int model_dim;
-
-        Encoder encoder;
-        Decoder decoder;
-        nn::Linear lm_head;
-
-        TransformerNMTImpl(const YAML::Node& args):
-            src_vocab_size { args["src_vocab_size"].as<int>() },
-            tgt_vocab_size { args["tgt_vocab_size"].as<int>() },
-            model_dim { args["model_dim"].as<int>() },
-
-            encoder {
-                register_module("encoder", Encoder(
-                src_vocab_size,
-                model_dim,
-                args["attn_head"].as<int>(),
-                args["encoder_layers"].as<int>(),
-                args["dropout"].as<double>()))
-            },
-            decoder {
-                register_module("decoder",  Decoder(
-                tgt_vocab_size,
-                model_dim,
-                args["attn_head"].as<int>(),
-                args["decoder_layers"].as<int>(),
-                args["dropout"].as<double>()))
-            },
-            lm_head { register_module("lm_head", nn::Linear(nn::LinearOptions(model_dim, tgt_vocab_size))) }
-        {}
-
-        auto forward(torch::Tensor& src, torch::Tensor& tgt, 
-            torch::Tensor& src_mask, torch::Tensor& tgt_mask) -> torch::Tensor {
-            // src: [batch_size, src_len]
-            // tgt: [batch_size, tgt_len]
-            // return: [batch_size, tgt_len, tgt_vocab_size]
-            auto memory = encoder(src, src_mask); // [batch_size, src_len, model_dim]
-            auto output = decoder(tgt, memory, tgt_mask, src_mask); // [batch_size, tgt_len, model_dim]
-            //output = lm_head(output); // [batch_size, tgt_len, tgt_vocab_size]
-            return output;
-        }
-    };
-    TORCH_MODULE(TransformerNMT);
 
 }

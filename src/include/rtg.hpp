@@ -13,8 +13,8 @@
 #define assertm(exp, msg) assert(((void)msg, exp))
 
 // define macro for aliasing std::shared_ptr<T> as Ptr<T>
-#define Ptr std::shared_ptr
-#define New std::make_shared
+//#define Ptr std::shared_ptr
+//#define New std::make_shared
 
 namespace fs = std::filesystem;
 
@@ -69,6 +69,14 @@ namespace rtg {
         return 0;
     }
 
+
+    enum Mode {
+        TRAINING,
+        INFERENCE,
+    };
+    
+
 } // namespace rtg
+
 
 
