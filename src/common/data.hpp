@@ -178,7 +178,7 @@ namespace rtg::data {
 
         auto read_examples(vector<string> data_paths, vector<size_t> max_length,
                 bool max_length_crop=true) -> std::generator<data::Example> {
-            LOG::info("Loading data from {}", fmt::join(data_paths, ","));
+            LOG::info("Loading data from {}", fmt::join(data_paths, ", "));
             if (data_paths.empty()) {
                 throw runtime_error("No data files specified");
             }

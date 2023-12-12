@@ -2,6 +2,7 @@
 #include <iostream>
 #include <coroutine>
 #include <ranges>
+#include <vector>
 #include <memory>
 #include <chrono>
 #include <__generator.hpp>  //reference implementation of generator
@@ -36,8 +37,6 @@ namespace rtg::train {
         fs::path work_dir;
         config::Config config;
         M model;
-        //nn::ModuleHolder<train::Criterion> criterion;
-        train::CrossEntropyLoss criterion;
         nn::AnyModule projector;
         shared_ptr<optim::Optimizer> optimizer;
         shared_ptr<optim::LRScheduler> scheduler;
@@ -61,11 +60,17 @@ namespace rtg::train {
             fp16_enabled{ config["trainer"]["fp16"].as<bool>(false) },
             pad_id {data_loader.vocabs[1]->pad_id()},   //vocabs[1] is the target vocab
             bos_id {data_loader.vocabs[1]->bos_id()},
-            criterion{ init_criterion(config, pad_id) },
-            loss_computer{  init_loss_computer(config, projector, criterion, pad_id) }
+            loss_computer{  init_loss_computer(config, projector, pad_id) }
         {
             spdlog::info("Trainer initialized; work_dir={} device={}; fp16={}",
                 work_dir, device == torch::kCUDA ? "cuda" : "cpu", fp16_enabled);
+            if (torch::cuda::is_available()) {
+                vector<string> device_ids;
+                for (auto i=0; i < torch::cuda::device_count(); i++){
+                    device_ids.push_back(fmt::format("{} ", i));
+                }
+                spdlog::info("CUDA devices: {}", fmt::join(device_ids, ", "));
+            }
         }
 
         Trainer(fs::path work_dir, fs::path config_file)
@@ -88,7 +93,6 @@ namespace rtg::train {
             auto checkpoint_file = work_dir / filename;
             spdlog::info("Saving checkpoint to {}", checkpoint_file);
             torch::save(model, checkpoint_file.string());
-            spdlog::info("Checkpoint saved");
         }
 
         auto step(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Tensor {

@@ -40,13 +40,12 @@ namespace rtg::train {
         }
     }
 
-    auto init_criterion(const config::Config& config, i64 ignore_idx) -> train::CrossEntropyLoss {
-        //return nn::CrossEntropyLoss(nn::CrossEntropyLossOptions().reduction(torch::kNone));
-        auto name = config["criterion"]["name"].as<string>("cross_entropy");
+    auto init_criterion(const YAML::Node& config, i64 ignore_idx) -> train::CrossEntropyLoss {
+        auto name = config["name"].as<string>("cross_entropy");
         if (name != "cross_entropy"){
             throw runtime_error("Unknown criterion " + name +". only cross_entropy supported");
         }
-        f32 label_smooth_rate = config["criterion"]["args"]["label_smooth_rate"].as<f32>(0.0);
+        f32 label_smooth_rate = config["args"]["label_smooth_rate"].as<f32>(0.0);
         auto criterion = train::CrossEntropyLoss(ignore_idx, label_smooth_rate);
         return criterion;
     }
@@ -120,15 +119,16 @@ namespace rtg::train {
         return mask;
     }
 
-    auto init_loss_computer(const config::Config& config, nn::AnyModule& projector,
-        train::CrossEntropyLoss& criterion, const i64 pad_id) -> shared_ptr<LossComputer> {
-        auto chunk_size = config["trainer"]["chunk_size"].as<int>(-1);
-        if (chunk_size == -1) {
-            return make_shared<SimpleLossComputer>(projector, criterion, pad_id);
+    auto init_loss_computer(const config::Config& config, nn::AnyModule& projector, const i64 pad_id) -> shared_ptr<LossComputer> {
+        auto trainer_criterion = init_criterion(config["trainer"]["criterion"], pad_id);
+        map<string, train::CrossEntropyLoss> validation_criteria;
+        for (auto criterion_config : config["validator"]["criteria"]) {
+            auto name = criterion_config["name"].as<string>();
+            validation_criteria[name] = init_criterion(criterion_config, pad_id);
         }
-        else {
-            return make_shared<ChunkedLossComputer>(projector, criterion, pad_id, chunk_size);
-        }
+        auto chunk_size = config["trainer"]["chunk_size"].as<size_t>(0);
+        auto container = make_shared<CriteriaContainer>(trainer_criterion, validation_criteria );
+        return make_shared<LossComputer>(projector, container, pad_id, chunk_size);
     }
 
 

@@ -19,10 +19,6 @@ optimizer:
     eps: 1e-9
     weight_decay: 0.0005
 
-criterion:
-  name: cross_entropy
-  args:
-    label_smooth_rate: 0.1
 
 scheduler:  # note this is not implemented yet
   name: inverse-sqrt 
@@ -51,17 +47,25 @@ trainer:
   fp16: true
   chunk_size: 4
   loader_threads: 1
-  criterion: cross_entropy
   log_frequency: 25u
   log_first: 10
 
+  criterion:
+    name: cross_entropy
+    args:
+      label_smooth_rate: 0.1
+
+
 validator:
   frequency: 500
-  criterion: cross_entropy
   data:
     - data/dev.kan
     - data/dev.eng
   batch_size: 8
+  criteria:
+    - name: cross_entropy
+      args:
+        label_smooth_rate: 0.0
 
 checkpoint:
   frequency: 250
