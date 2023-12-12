@@ -20,28 +20,31 @@ namespace rtg::train {
         SIGMOID,
     };
 
-    class Criterion : public nn::Module {
+    class CriterionImpl : public nn::Module {
         protected:
             str _name;
             i64 _ignore_index;
             DataType _input_type;
 
         public:
-        Criterion(str name, i64 ignore_index, DataType input_type = DataType::LOGITS):
+        CriterionImpl(str name, i64 ignore_index, DataType input_type = DataType::LOGITS):
             _name {name},
             _ignore_index {ignore_index},
             _input_type {input_type}
         {}
+        virtual auto forward(Tensor input, Tensor target, f32 normalizer, optional<Tensor> mask=nullopt) -> Tensor = 0;
     };
+    TORCH_MODULE(Criterion);
 
-    class CrossEntropyLossImpl: public Criterion {
+
+    class CrossEntropyLossImpl: public CriterionImpl {
     protected:
         f32 _label_smooth_rate = 0.0;
         F::CrossEntropyFuncOptions _options;
 
     public:
         CrossEntropyLossImpl(i64 ignore_index = -100, f32 label_smooth_rate = 0.0):
-            Criterion("CrossEntropyLoss", ignore_index, DataType::LOGITS),
+            CriterionImpl("cross_entropy", ignore_index, DataType::LOGITS),
             _label_smooth_rate{ label_smooth_rate },
             _options { F::CrossEntropyFuncOptions()
                         .reduction(torch::kNone)
@@ -50,7 +53,7 @@ namespace rtg::train {
                     }
         {}
 
-        auto forward(Tensor input, Tensor target, f32 normalizer, optional<Tensor> mask=nullopt) -> Tensor {
+        auto forward(Tensor input, Tensor target, f32 normalizer, optional<Tensor> mask) -> Tensor {
             // input: [batch_size, seq_len, vocab_size]
             // target: [batch_size, seq_len]
             auto num_labels = input.size(-1);
@@ -69,7 +72,7 @@ namespace rtg::train {
     };
     TORCH_MODULE(CrossEntropyLoss);
 
-    class KLDivergenceImpl: public Criterion {
+    class KLDivergenceImpl: public CriterionImpl {
     protected:
         f32 _label_smooth_rate = 0.0;
         i64 _num_labels;
@@ -78,7 +81,7 @@ namespace rtg::train {
 
     public:
         KLDivergenceImpl(i64 num_labels, i64 ignore_index = -100, f32 label_smooth_rate = 0.0):
-            Criterion("KLDivergence", ignore_index, DataType::LOGITS), 
+            CriterionImpl("kl_divergence", ignore_index, DataType::LOGITS), 
             _num_labels{ num_labels },
             _label_smooth_rate{ label_smooth_rate },
             _num_exclusions{ _ignore_index >= 0 ? 2 : 1 },  // the hot label and ignore_index (optional)
@@ -89,7 +92,7 @@ namespace rtg::train {
             }
         }
 
-        auto forward(Tensor input, Tensor target, f32 normalizer) -> Tensor {
+        auto forward(Tensor input, Tensor target, f32 normalizer, optional<Tensor> mask) -> Tensor {
             // input: [batch_size, seq_len, vocab_size]
             // target: [batch_size, seq_len]
             
@@ -107,7 +110,9 @@ namespace rtg::train {
                 input_flat.index_put_({Slice(), _ignore_index}, 0.0);   // caution: this is inplace operation on inputs!
             }
             auto loss = F::kl_div(input_flat.log_softmax(-1), target_flat_smooth, _options);
-            if (_ignore_index >= 0) { //exclude padding tokens (rows) in input
+            if (mask) {
+                loss.masked_fill_(mask.value().reshape({ -1 }), 0.0);
+            } else if (_ignore_index >= 0) { //exclude padding tokens (rows) in input
                 loss.masked_fill_(target_flat_1hot == _ignore_index, 0.0);
             } 
             loss = loss.sum() / normalizer;

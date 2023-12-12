@@ -40,14 +40,24 @@ namespace rtg::train {
         }
     }
 
-    auto init_criterion(const YAML::Node& config, i64 ignore_idx) -> train::CrossEntropyLoss {
+    auto init_criterion(const YAML::Node& config, i64 ignore_idx) -> nn::AnyModule {
         auto name = config["name"].as<string>("cross_entropy");
-        if (name != "cross_entropy"){
+        if (name == "cross_entropy") {
+           f32 label_smooth_rate = config["args"]["label_smooth_rate"].as<f32>(0.0);
+           auto criterion = train::CrossEntropyLoss(ignore_idx, label_smooth_rate);
+           return nn::AnyModule(criterion);
+        } else if (name  == "kl_divergence" ) {
+            f32 label_smooth_rate = config["args"]["label_smooth_rate"].as<f32>(0.0);
+            i64 num_labels = config["args"]["num_labels"].as<i64>(0);
+            if (num_labels < 1) {
+                throw runtime_error("num_labels must be > 0 for kl_divergence with label_smoothing");
+            }
+            auto criterion = train::KLDivergence(num_labels, ignore_idx, label_smooth_rate);
+           return nn::AnyModule(criterion);
+        } else {
             throw runtime_error("Unknown criterion " + name +". only cross_entropy supported");
         }
-        f32 label_smooth_rate = config["args"]["label_smooth_rate"].as<f32>(0.0);
-        auto criterion = train::CrossEntropyLoss(ignore_idx, label_smooth_rate);
-        return criterion;
+        
     }
 
     template <typename M>
@@ -121,7 +131,7 @@ namespace rtg::train {
 
     auto init_loss_computer(const config::Config& config, nn::AnyModule& projector, const i64 pad_id) -> shared_ptr<LossComputer> {
         auto trainer_criterion = init_criterion(config["trainer"]["criterion"], pad_id);
-        map<string, train::CrossEntropyLoss> validation_criteria;
+        map<string, nn::AnyModule> validation_criteria;
         for (auto criterion_config : config["validator"]["criteria"]) {
             auto name = criterion_config["name"].as<string>();
             validation_criteria[name] = init_criterion(criterion_config, pad_id);

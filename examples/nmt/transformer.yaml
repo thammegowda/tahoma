@@ -51,8 +51,9 @@ trainer:
   log_first: 10
 
   criterion:
-    name: cross_entropy
+    name: kl_divergence
     args:
+      num_labels : 8000
       label_smooth_rate: 0.1
 
 

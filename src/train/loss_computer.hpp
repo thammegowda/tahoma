@@ -3,6 +3,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sentencepiece_processor.h>
 #include <rtg.hpp>
 
@@ -16,8 +17,8 @@ using namespace rtg;
 namespace rtg::train {
 
       struct CriteriaContainer {
-        train::CrossEntropyLoss train; // a single criterion for training
-        std::map<std::string, train::CrossEntropyLoss> validation; // multiple criteria for validation, with names
+        nn::AnyModule train; // a single criterion for training
+        std::map<std::string, nn::AnyModule> validation; // multiple criteria for validation, with names
     };
 
 
@@ -44,7 +45,8 @@ namespace rtg::train {
             }
             // get first criterion for validation
             auto& criterion = (mode == Mode::TRAINING) ? _criteria->train : _criteria->validation.begin()->second;
-            Tensor loss = criterion(output_flat, labels_flat, normalizer);  // [batch_size * seq_len]
+            std::optional<Tensor> mask; 
+            Tensor loss = criterion.forward(output_flat, labels_flat, normalizer, mask);  // [batch_size * seq_len]
             if (mode == Mode::TRAINING) {
                 loss.backward();
             }
