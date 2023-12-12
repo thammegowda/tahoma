@@ -6,6 +6,7 @@
 
 #include "../common/config.hpp"
 #include "../common/data.hpp"
+#include "./criterion.hpp"
 
 using namespace rtg;
 
@@ -17,41 +18,37 @@ namespace rtg::train {
 
     protected:
         nn::AnyModule projector;
-        nn::CrossEntropyLoss criterion;
+        train::CrossEntropyLoss criterion;
         int64_t pad_id;
     public:
-        LossComputer(nn::AnyModule projector, nn::CrossEntropyLoss criterion, int64_t pad_id)
+        LossComputer(nn::AnyModule& projector, train::CrossEntropyLoss& criterion, const i64 pad_id)
             : projector{ projector }, criterion{ criterion }, pad_id{ pad_id }
         {}
 
-        virtual auto compute(Tensor features, Tensor labels, int64_t normalizer = -1, Mode mode = Mode::TRAINING) -> Tensor = 0;
+        virtual auto compute(Tensor features, Tensor labels, f32 normalizer = -1, Mode mode = Mode::TRAINING) -> Tensor = 0;
     };
 
 
     class SimpleLossComputer : public LossComputer {
 
     public:
-        SimpleLossComputer(nn::AnyModule projector, nn::CrossEntropyLoss criterion, int64_t pad_id)
+        SimpleLossComputer(nn::AnyModule& projector, train::CrossEntropyLoss& criterion, i64 pad_id)
             : LossComputer{ projector, criterion, pad_id }
         {}
 
-        auto compute(Tensor features, Tensor labels, int64_t normalizer = -1, Mode mode = Mode::TRAINING) -> Tensor override {
+        auto compute(Tensor features, Tensor labels, f32 normalizer = -1.0, Mode mode = Mode::TRAINING) -> Tensor override {
             auto output = projector.forward(features);
             auto output_flat = output.view({ output.size(0) * output.size(1), -1 }); // [batch_size * seq_len, vocab_size]
             auto labels_flat = labels.reshape({ -1 }); // [batch_size * seq_len]
-            Tensor loss = criterion(output_flat, labels_flat);  // [batch_size * seq_len]
-            //exclude padding tokens from loss calculation
-            loss.masked_fill_(labels_flat == pad_id, 0.0);
-            if (normalizer <= 0) { // self computed normalizer
+            if (normalizer <= 0.0) { // self computed normalizer
                 normalizer = (labels_flat != pad_id).sum().item().toInt(); // #total - #mask
             }
-            loss = loss.sum() / normalizer;
+            Tensor loss = criterion(output_flat, labels_flat, normalizer);  // [batch_size * seq_len]
             if (mode == Mode::TRAINING) {
                 loss.backward();
             }
             return loss;
         }
-
     };
 
 
@@ -61,7 +58,7 @@ namespace rtg::train {
         size_t chunk_size;
 
     public:
-        ChunkedLossComputer(nn::AnyModule projector, nn::CrossEntropyLoss criterion, int64_t pad_id, size_t chunk_size)
+        ChunkedLossComputer(nn::AnyModule& projector, train::CrossEntropyLoss& criterion, int64_t pad_id, size_t chunk_size)
             : SimpleLossComputer{ projector, criterion, pad_id }, chunk_size{ chunk_size }
         {
             if (chunk_size <= 0) {
@@ -69,7 +66,7 @@ namespace rtg::train {
             }
         }
 
-        auto compute(Tensor features, Tensor labels, int64_t normalizer = -1, Mode mode = Mode::TRAINING) -> Tensor override {
+        auto compute(Tensor features, Tensor labels, f32 normalizer = -1.0, Mode mode = Mode::TRAINING) -> Tensor override {
             /**
              * Compute loss in chunks to avoid OOM
              * features: [batch_size, seq_len, hidden_size]

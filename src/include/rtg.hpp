@@ -37,6 +37,7 @@ struct fmt::formatter<fs::path> {
 namespace rtg {
     
     namespace LOG = spdlog;
+    using namespace std;
 
     // define short aliases
     using i8 = int8_t;

@@ -12,6 +12,7 @@
 #include "../common/config.hpp"
 #include "../common/data.hpp"
 #include "./loss_computer.hpp"
+#include "./criterion.hpp"
 
 
 
@@ -39,9 +40,15 @@ namespace rtg::train {
         }
     }
 
-    template <typename C>
-    auto init_criterion(const config::Config& config) -> C {
-        return nn::CrossEntropyLoss(nn::CrossEntropyLossOptions().reduction(torch::kNone));
+    auto init_criterion(const config::Config& config, i64 ignore_idx) -> train::CrossEntropyLoss {
+        //return nn::CrossEntropyLoss(nn::CrossEntropyLossOptions().reduction(torch::kNone));
+        auto name = config["criterion"]["name"].as<string>("cross_entropy");
+        if (name != "cross_entropy"){
+            throw runtime_error("Unknown criterion " + name +". only cross_entropy supported");
+        }
+        f32 label_smooth_rate = config["criterion"]["args"]["label_smooth_rate"].as<f32>(0.0);
+        auto criterion = train::CrossEntropyLoss(ignore_idx, label_smooth_rate);
+        return criterion;
     }
 
     template <typename M>
@@ -114,7 +121,7 @@ namespace rtg::train {
     }
 
     auto init_loss_computer(const config::Config& config, nn::AnyModule& projector,
-         nn::CrossEntropyLoss& criterion, int64_t pad_id) -> shared_ptr<LossComputer> {
+        train::CrossEntropyLoss& criterion, const i64 pad_id) -> shared_ptr<LossComputer> {
         auto chunk_size = config["trainer"]["chunk_size"].as<int>(-1);
         if (chunk_size == -1) {
             return make_shared<SimpleLossComputer>(projector, criterion, pad_id);
@@ -133,12 +140,12 @@ namespace rtg::train {
 
     struct Stopper {
 
-        int64_t patience = 10;
-        int64_t num_stalls = 0;
-        double best_loss = numeric_limits<double>::infinity();
-        Stopper(int64_t patience) : patience{ patience } {}
+        int32_t patience = 10;
+        int32_t num_stalls = 0;
+        float best_loss = numeric_limits<float>::infinity();
+        Stopper(int32_t patience) : patience{ patience } {}
 
-        auto is_stop(double loss) -> StopperStatus {
+        auto is_stop(float loss) -> StopperStatus {
             using enum StopperStatus;
             if (loss <= best_loss) {
                 best_loss = loss;

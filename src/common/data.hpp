@@ -208,10 +208,12 @@ namespace rtg::data {
                 fields = vector<string>(num_fields);
                 field_ids = vector<vector<int32_t>>(num_fields);
                 for (size_t i = 0; i < num_fields; i++) {
-                    if (!getline(files[i], fields[i]) || fields[i].empty()) {
+                    if (!getline(files[i], fields[i])) {
                         has_data = false;
-                        spdlog::warn("file {} has no more data or there are empty rows. Stopping after {} lines", data_paths[i], rec_num+1);
                         break;
+                    }
+                    if (fields[i].empty()) {
+                        throw runtime_error("Empty line in file: " + data_paths[i] + " at line: " + std::to_string(rec_num + 1));
                     }
                 }
 
@@ -238,7 +240,7 @@ namespace rtg::data {
             for (auto& file : files) {
                 file.close();
             }
-            spdlog::info("Reached the end of data files");
+            spdlog::debug("Reached the end of data files");
         }
 
         auto make_batches(std::generator<data::Example> examples, size_t batch_size,

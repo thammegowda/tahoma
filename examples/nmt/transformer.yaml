@@ -3,11 +3,11 @@ model:
   args:
     src_vocab_size: 8000
     tgt_vocab_size: 8000
-    encoder_layers: 6
-    decoder_layers: 3
+    encoder_layers: 4
+    decoder_layers: 2
     model_dim: 256
     attn_head: 8
-    ffn_dim: 1024
+    ffn_dim: 512
     dropout: 0.1
 
 optimizer:
@@ -18,6 +18,11 @@ optimizer:
       - 0.98
     eps: 1e-9
     weight_decay: 0.0005
+
+criterion:
+  name: cross_entropy
+  args:
+    label_smooth_rate: 0.1
 
 scheduler:  # note this is not implemented yet
   name: inverse-sqrt 
@@ -37,25 +42,26 @@ trainer:
   data:
     - data/train.kan
     - data/train.eng
-  batch_size: 24
+  batch_size: 8
   epochs: 25
   max_length: &max_length
     - 512
     - 512
   max_length_crop: true
   fp16: true
-  chunk_size: 8
+  chunk_size: 4
   loader_threads: 1
   criterion: cross_entropy
   log_frequency: 25u
+  log_first: 10
 
 validator:
-  frequency: 100
+  frequency: 500
   criterion: cross_entropy
   data:
     - data/dev.kan
     - data/dev.eng
-  batch_size: 64
+  batch_size: 8
 
 checkpoint:
   frequency: 250

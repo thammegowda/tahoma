@@ -18,13 +18,15 @@ using namespace torch::indexing;
 
 namespace rtg::layer {
 
-    // TODO: split this into a separate file, also separate position+word embeddings
+    // TODO: split this into a separate separate position+word embeddings
     struct AbsolutePositionEmbeddingImpl : nn::Module {
         nn::Embedding embedding;
         torch::Tensor positions;
         nn::Dropout dropout;
+        int model_dim;
 
         AbsolutePositionEmbeddingImpl(int vocab_size, int model_dim, double dropout = 0.1, const int max_len = 5000) :
+            model_dim{ model_dim },
             embedding{ register_module("embedding", nn::Embedding(nn::EmbeddingOptions(vocab_size, model_dim))) },
             dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
             positions{ torch::zeros({1, max_len, model_dim}, torch::requires_grad(false)) }
@@ -44,7 +46,8 @@ namespace rtg::layer {
 
         auto forward(torch::Tensor& x) -> torch::Tensor {
             x = embedding(x);   // [batch_size, seq_len] -> [batch_size, seq_len, model_dim]
-            // x = x+pe[:, :x.size(1)]
+            x = x * std::sqrt(model_dim);
+            // x = x + pe[:, :x.size(1)]
             auto pe = positions.index({ Slice(), Slice(None, x.size(1)) });
             x = x + pe;
             x = dropout(x);

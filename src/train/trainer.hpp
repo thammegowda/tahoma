@@ -30,13 +30,14 @@ using namespace chrono;
 
 namespace rtg::train {
 
-    template <typename M, typename C>
+    template <typename M>
     class Trainer {
     protected:
         fs::path work_dir;
         config::Config config;
         M model;
-        C criterion;
+        //nn::ModuleHolder<train::Criterion> criterion;
+        train::CrossEntropyLoss criterion;
         nn::AnyModule projector;
         shared_ptr<optim::Optimizer> optimizer;
         shared_ptr<optim::LRScheduler> scheduler;
@@ -53,7 +54,6 @@ namespace rtg::train {
             : work_dir{ work_dir },
             config{ conf },
             model{ init_model<M>(config, device) },
-            criterion{ init_criterion<C>(config) },
             projector{ model->lm_head },
             optimizer{ init_optimizer(config, model) },
             scheduler{ init_scheduler(config, *optimizer) },
@@ -61,9 +61,11 @@ namespace rtg::train {
             fp16_enabled{ config["trainer"]["fp16"].as<bool>(false) },
             pad_id {data_loader.vocabs[1]->pad_id()},   //vocabs[1] is the target vocab
             bos_id {data_loader.vocabs[1]->bos_id()},
+            criterion{ init_criterion(config, pad_id) },
             loss_computer{  init_loss_computer(config, projector, criterion, pad_id) }
         {
-            spdlog::info("Trainer initialized; work_dir={} device={}; fp16={}", work_dir, device == torch::kCUDA ? "cuda" : "cpu", fp16_enabled);
+            spdlog::info("Trainer initialized; work_dir={} device={}; fp16={}",
+                work_dir, device == torch::kCUDA ? "cuda" : "cpu", fp16_enabled);
         }
 
         Trainer(fs::path work_dir, fs::path config_file)
@@ -134,27 +136,30 @@ namespace rtg::train {
             model->train();
 
             Stopper stopper(config["trainer"]["early_stopping"].as<int>(8));
+            int16_t log_first = config["trainer"]["log_first"].as<int16_t>(0);
+            auto stats = StatsCounter(log_frequency, /*name=*/"Training", /*log_first=*/log_first);
 
             for (int32_t epoch = 0; epoch < num_epochs; epoch++) {
-                auto stats = StatsCounter(log_frequency);
                 for (auto batch : data_loader.get_train_data()) {
                     step(batch, stats, Mode::TRAINING);
                     batch.fields.clear(); // clear references to tensors
-
                     if (stats.step_num % validation_frequency == 0) {
+                        float valid_loss;
                         { // scope for AutoGradMode
                             torch::AutoGradMode enable_grad(false);
                             model->eval();
-                            auto valid_loss = validate();
-                            switch (stopper.is_stop(valid_loss)) {
-                                case StopperStatus::NEW_BEST: // new best loss
-                                    save_checkpoint("best");
-                                    break;
-                                case StopperStatus::STOP: // stop training
-                                    LOG::info("Early stopping at epoch {} step {}", epoch, stats.step_num);
-                                    return;
-                               // else continue training
-                            }
+                            valid_loss = validate();
+                        }
+                        // TODO: support multiple validation metrics
+                        switch (stopper.is_stop(valid_loss)) {
+                            case StopperStatus::NEW_BEST: // new best loss
+                                save_checkpoint("best");
+                                break;
+                            case StopperStatus::STOP: // stop training
+                                save_checkpoint("last");
+                                LOG::info("Early stopping at epoch {} step {}", epoch, stats.step_num);
+                                return;
+                            // else continue training
                         }
                         model->train();
                     }
@@ -162,12 +167,12 @@ namespace rtg::train {
                         save_checkpoint(fmt::format("step.{}", stats.step_num));
                     }
                 }
-                // todo validation
             }
         }
 
-        auto validate(){
-            auto stats = StatsCounter(config["trainer"]["log_frequency"].as<string>("25u"));
+        auto validate() -> float {
+            auto log_frequency = config["validator"]["log_frequency"].as<string>("5000u");
+            auto stats = StatsCounter(log_frequency, /*name*/"Validation");
             LOG::info("Starting validation. log_frequency={}", stats.log_frequency);
             for (auto batch :  data_loader.get_validation_data()) {
                 step(batch, stats, Mode::INFERENCE);
@@ -175,8 +180,6 @@ namespace rtg::train {
             LOG::info("Validation finished. Avg loss: {:.5f}", stats.avg_loss());
             return stats.avg_loss();
         }
-
-
     };
 
     auto parse_args(int argc, char* argv[]) -> argparse::ArgumentParser {
@@ -211,7 +214,7 @@ int main(int argc, char* argv[]) {
     if (!config_file_arg.empty()) {
         config_file = fs::path{ config_file_arg };
     }
-    auto trainer = train::Trainer<nmt::transformer::TransformerNMT, nn::CrossEntropyLoss>(work_dir, config_file);
+    auto trainer = train::Trainer<nmt::transformer::TransformerNMT>(work_dir, config_file);
     trainer.train();
     spdlog::info("main finished..");
     return 0;
