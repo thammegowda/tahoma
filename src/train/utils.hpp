@@ -157,13 +157,12 @@ namespace rtg::train {
 
         auto is_stop(float loss) -> StopperStatus {
             using enum StopperStatus;
-            if (loss <= best_loss) {
+            if (loss < best_loss) {
                 best_loss = loss;
                 num_stalls = 0;
                 spdlog::info("New best loss: {:.5f}", loss);
                 return NEW_BEST;
-            }
-            else {
+            } else {
                 num_stalls++;
                 spdlog::info("No improvement in last {} validations; patience={}; best={:.5f}; current={:.5f}", num_stalls, patience, best_loss, loss);
                 return num_stalls >= patience ? STOP : NO_STOP;
