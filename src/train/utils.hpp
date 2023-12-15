@@ -82,17 +82,24 @@ namespace rtg::train {
             }
             LOG::info("Optimizer {}", optim_name);
             return std::make_shared<optim::Adam>(model->parameters(), options);
-        }
-        else {
+        } else {
             throw runtime_error("Unknown or unsupported optimizer " + optim_name);
         }
     }
 
-    auto init_scheduler(const config::Config& config, optim::Optimizer& optimizer)
-        -> std::shared_ptr<optim::LRScheduler> {
+    auto init_scheduler(const config::Config& config, optim::Optimizer& optimizer, i64 initial_step=0)
+        -> std::shared_ptr<train::LRScheduler> {
+        i64 start_step = 0; // TODO: restore from checkpt dir tor resume training
         auto scheduler_config = config["scheduler"];
-        auto scheduler_name = scheduler_config["name"].as<string>();
-        return std::make_shared<optim::StepLR>(optimizer, 1.0, 0.95);
+        auto name = scheduler_config["name"].as<string>();
+        YAML::Node options = scheduler_config["args"];
+        if (name == "inverse_sqrt") {
+            return std::make_shared<train::InverseSqrtScheduler>(optimizer, start_step, options);
+        } else if (name == "noam") {
+            return std::make_shared<train::NoamScheduler>(optimizer, start_step, options);
+        } else {
+            throw runtime_error("Unknown or unsupported scheduler " + name);
+        }
     }
 
     auto init_config(fs::path work_dir, fs::path config_file) -> config::Config {

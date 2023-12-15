@@ -106,7 +106,7 @@ namespace rtg::train {
             return step_num > 0 ? tot_loss / step_num : 0.0;
         }
 
-        auto update(float loss, size_t num_sents, size_t num_tokens, size_t num_steps = 1) -> StatsCounter& {
+        auto update(float loss, size_t num_sents, size_t num_tokens, f32 lr, size_t num_steps = 1) -> StatsCounter& {
             tot_sents += num_sents;
             tot_tokens += num_tokens;
             step_num += num_steps;
@@ -132,8 +132,8 @@ namespace rtg::train {
                 auto duration_ms = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start_time);
                 auto toks_rate = 1000.0f * tot_tokens / duration_ms.count();
                 auto sents_rate = 1000.0f * tot_sents / duration_ms.count();
-                spdlog::info("{} Step: {}; Loss: {:.5f}; AvgLoss: {:.5f}; sents: {}; toks: {}, speed: {:.1f} tok/s {:.1f} sent/s",
-                    name, step_num, loss, avg_loss(), tot_sents, tot_tokens, toks_rate, sents_rate);
+                spdlog::info("{} Step: {}; Loss: {:.5f}; AvgLoss: {:.5f}; sents: {}; toks: {}, speed: {:.1f} tok/s {:.1f} sent/s LR: {:.5f}",
+                    name, step_num, loss, avg_loss(), tot_sents, tot_tokens, toks_rate, sents_rate, lr);
             }
             return *this;
         }

@@ -39,8 +39,9 @@ namespace rtg::train {
         M model;
         nn::AnyModule projector;
         shared_ptr<optim::Optimizer> optimizer;
-        shared_ptr<optim::LRScheduler> scheduler;
+        shared_ptr<train::LRScheduler> scheduler;
         rtg::data::DataLoader data_loader;
+        Stopper stopper;
 
         bool fp16_enabled;
         int64_t pad_id = 0;
@@ -60,7 +61,8 @@ namespace rtg::train {
             fp16_enabled{ config["trainer"]["fp16"].as<bool>(false) },
             pad_id {data_loader.vocabs[1]->pad_id()},   //vocabs[1] is the target vocab
             bos_id {data_loader.vocabs[1]->bos_id()},
-            loss_computer{  init_loss_computer(config, projector, pad_id) }
+            loss_computer{  init_loss_computer(config, projector, pad_id) },
+            stopper{ config["trainer"]["early_stopping"].as<int>(0) }
         {
             spdlog::info("Trainer initialized; work_dir={} device={}; fp16={}",
                 work_dir, device == torch::kCUDA ? "cuda" : "cpu", fp16_enabled);
@@ -114,7 +116,6 @@ namespace rtg::train {
             auto normalizer = (tgt_ids != pad_id).sum().item().toInt(); // #total - #mask
             auto output = model(src_ids, tgt_ids, src_mask, tgt_mask);
             auto loss = loss_computer->compute(output, tgt_ids, normalizer, mode);
-            stats.update(loss.item().toDouble(), tgt_ids.size(0), normalizer);
 
             if (fp16_enabled) {  // __exit__()
                 at::autocast::clear_cache();
@@ -125,9 +126,13 @@ namespace rtg::train {
                 scheduler->step();
                 optimizer->zero_grad();
             }
+            stats.update(loss.item().toDouble(), tgt_ids.size(0), normalizer, scheduler->get_last_rate());
             return loss;
         }
 
+        void log_samples(){
+            
+        }
        
         void train() {
             LOG::info("Moving to device {}", device == torch::kCUDA ? "cuda" : "cpu");
@@ -147,13 +152,9 @@ namespace rtg::train {
                 for (auto batch : data_loader.get_train_data()) {
                     step(batch, stats, Mode::TRAINING);
                     batch.fields.clear(); // clear references to tensors
+
                     if (stats.step_num % validation_frequency == 0) {
-                        float valid_loss;
-                        { // scope for AutoGradMode
-                            torch::AutoGradMode enable_grad(false);
-                            model->eval();
-                            valid_loss = validate();
-                        }
+                        float valid_loss = validate();
                         // TODO: support multiple validation metrics
                         switch (stopper.is_stop(valid_loss)) {
                             case StopperStatus::NEW_BEST: // new best loss
@@ -175,6 +176,9 @@ namespace rtg::train {
         }
 
         auto validate() -> float {
+            
+            torch::AutoGradMode enable_grad(false);
+            model->eval();
             auto log_frequency = config["validator"]["log_frequency"].as<string>("5000u");
             auto stats = StatsCounter(log_frequency, /*name*/"Validation");
             LOG::info("Starting validation. log_frequency={}", stats.log_frequency);
