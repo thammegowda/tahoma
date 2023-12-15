@@ -49,6 +49,7 @@ namespace rtg::train {
         shared_ptr<LossComputer> _loss_computer;
         torch::Device _device{ torch::cuda::is_available() ? "cuda" : "cpu" };
         data::Batch _sample_batch;
+        Stopper _stopper;
 
     public:
         Trainer(fs::path work_dir, config::Config conf)
@@ -63,8 +64,8 @@ namespace rtg::train {
             _pad_id {_data_loader.vocabs[1]->pad_id()},   //vocabs[1] is the target vocab
             _bos_id {_data_loader.vocabs[1]->bos_id()},
             _loss_computer{  init_loss_computer(_config, _projector, _pad_id) },
-
-            _sample_batch{ _data_loader.get_samples(_config["validator"]["data"].as<vector<string>>(), /*n_samples*/5) }
+            _sample_batch{ _data_loader.get_samples(_config["validator"]["data"].as<vector<string>>(), /*n_samples*/5) },
+            _stopper{ _config["trainer"]["early_stopping"].as<int>(8) }
         {
             spdlog::info("Trainer initialized; work_dir={} device={}; fp16={}",
                 work_dir, _device == torch::kCUDA ? "cuda" : "cpu", _fp16_enabled);
@@ -74,6 +75,7 @@ namespace rtg::train {
                     device_ids.push_back(fmt::format("{} ", i));
                 }
                 spdlog::info("CUDA devices: {}", fmt::join(device_ids, ", "));
+                spdlog::info("Early stopping enabled? {}, patience: {}",  _stopper.patience > 0 ? "Yes" : "No",  _stopper.patience);
             }
         }
 
@@ -92,6 +94,7 @@ namespace rtg::train {
         }
 
         auto step(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Tensor {
+            torch::AutoGradMode enable_grad(mode == Mode::TRAINING); // RAII
              if (_fp16_enabled) {  //__enter__()
                 at::autocast::set_enabled(true);
             }
@@ -137,29 +140,21 @@ namespace rtg::train {
             Stopper stopper(_config["trainer"]["early_stopping"].as<int>(8));
             int16_t log_first = _config["trainer"]["log_first"].as<int16_t>(0);
             auto stats = StatsCounter(log_frequency, /*name=*/"Training", /*log_first=*/log_first);
-
             for (i32 epoch = 0; epoch < num_epochs; epoch++) {
                 for (auto batch : _data_loader.get_train_data()) {
                     step(batch, stats, Mode::TRAINING);
                     batch.fields.clear(); // clear references to tensors
 
                     if (stats.step_num % validation_frequency == 0) {
-                        float valid_loss = validate();
-                        // TODO: support multiple validation metrics
-                        switch (stopper.is_stop(valid_loss)) {
-                            case StopperStatus::NEW_BEST: // new best loss
-                                save_checkpoint("best");
-                                break;
-                            case StopperStatus::STOP: // stop training
-                                save_checkpoint("last");
-                                LOG::info("Early stopping at epoch {} step {}", epoch, stats.step_num);
-                                return;
-                            // else continue training
+                        bool is_early_stop = validate();
+                        if (is_early_stop) {
+                            LOG::info("Early stopping at epoch {} step {}", epoch, stats.step_num);
+                            return;
                         }
                         _model->train();
                     }
                     if (stats.step_num % checkpoint_frequency == 0) {
-                        save_checkpoint(fmt::format("step.{}", stats.step_num));
+                        save_checkpoint(fmt::format("step_{}", stats.step_num));
                     }
                 }
             }
@@ -178,7 +173,10 @@ namespace rtg::train {
             }
         }
 
-        auto validate(bool show_samples=true) -> float {
+        auto validate(bool show_samples=true) -> bool {
+            /**
+             * Returns true if early stopping is triggered
+            */
             torch::AutoGradMode enable_grad(false);
             _model->eval();
             if (show_samples) {
@@ -191,7 +189,22 @@ namespace rtg::train {
                 step(batch, stats, Mode::INFERENCE);
             }
             LOG::info("Validation finished. Avg loss: {:.5f}", stats.avg_loss());
-            return stats.avg_loss();
+            f32 valid_loss = stats.avg_loss();
+            // TODO: support multiple validation metrics
+
+            switch (_stopper.is_stop(valid_loss)) {
+                case StopperStatus::STOP: // stop training
+                    save_checkpoint("last");
+                    return true;
+                case StopperStatus::NEW_BEST: // new best loss
+                    spdlog::info("Saving new best model");
+                    save_checkpoint("best");
+                    return false;
+                case StopperStatus::CONTINUE: // continue training
+                    spdlog::info("No improvement in validation metric. Number of stalls: {}, (patience: {}) ", _stopper.num_stalls, _stopper.patience);
+                default:
+                    return false;
+            }
         }
     };
 

@@ -1,5 +1,5 @@
 model:
-  name: transformer
+  name: transformer_nmt
   args:
     src_vocab_size: 8000
     tgt_vocab_size: 8000
@@ -23,10 +23,9 @@ optimizer:
 scheduler:
   name: noam 
   args:
-    warmup_steps: 2000
+    warmup_steps: 500
     model_dim: 256
     constant: 1.0
-
 
 schema:
   fields:
@@ -50,8 +49,8 @@ trainer:
   fp16: true
   chunk_size: 4
   loader_threads: 1
-  log_frequency: 25u
-  log_first: 10
+  log_frequency: 50u
+  log_first: 5
 
   criterion:
     name: kl_divergence
@@ -59,9 +58,8 @@ trainer:
       num_labels : 8000
       label_smooth_rate: 0.1
 
-
 validator:
-  frequency: 50
+  frequency: 500
   data:
     - data/dev.kan
     - data/dev.eng
@@ -72,9 +70,6 @@ validator:
         label_smooth_rate: 0.0
 
 checkpoint:
-  frequency: 250
+  frequency: 1000
   keep: 10
-
-
-
 

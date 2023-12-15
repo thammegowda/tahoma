@@ -48,6 +48,8 @@ namespace rtg::inference {
             tgt_ids = tgt_ids.view({-1}).to(torch::kCPU).contiguous();
             std::vector<i64> tgt_ids_vec(tgt_ids.data_ptr<i64>(), tgt_ids.data_ptr<i64>() + tgt_ids.numel());
             std::vector<int> tgt_ids_vec2(tgt_ids_vec.begin(), tgt_ids_vec.end());
+            string ids_str = ""; for (auto i: tgt_ids_vec2) ids_str += std::to_string(i) + " ";
+            spdlog::info("HYP IDs: {}", ids_str);
             auto tgt_tokens = _vocabs[1]->DecodeIds(tgt_ids_vec2);  // spm takes int and not int64
             return tgt_tokens;
         }

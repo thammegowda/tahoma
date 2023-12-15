@@ -30,7 +30,7 @@ namespace rtg::train {
     template <typename M>
     auto init_model(config::Config& config, torch::Device& device) -> M {
         auto model_type = config["model"]["name"].as<string>();
-        if (model_type == "transformer") {
+        if (model_type == "transformer_nmt") {
             YAML::Node model_args = config["model"]["args"];
             auto model = model::TransformerNMT(model_args);
             return model;
@@ -151,7 +151,7 @@ namespace rtg::train {
 
     enum StopperStatus {
         STOP,  // early stop reached
-        NO_STOP, // continue training
+        CONTINUE, // continue training
         NEW_BEST, // new best loss, and continue training
     };
 
@@ -172,7 +172,7 @@ namespace rtg::train {
             } else {
                 num_stalls++;
                 spdlog::info("No improvement in last {} validations; patience={}; best={:.5f}; current={:.5f}", num_stalls, patience, best_loss, loss);
-                return num_stalls >= patience ? STOP : NO_STOP;
+                return num_stalls >= patience ? STOP : CONTINUE;
             }
         }
     };
