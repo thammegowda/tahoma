@@ -18,6 +18,7 @@
 #include "../model/transformer_nmt.hpp"
 #include "./utils.hpp"
 #include "./stats_counter.hpp"
+#include "../inference/decoder.hpp"
 
 namespace nn = torch::nn;
 namespace optim = torch::optim;
@@ -30,54 +31,6 @@ using namespace rtg;
 using namespace chrono;
 
 namespace rtg::train {
-
-
-    class Decoder {
-    private:
-        rtg::model::TransformerNMT _model;
-        nn::AnyModule _lm_head;
-        vector<shared_ptr<sp::SentencePieceProcessor>> _vocabs;
-        torch::Device _device;
-    public:
-        Decoder(rtg::model::TransformerNMT _model, nn::AnyModule lm_head, vector<shared_ptr<sp::SentencePieceProcessor>> _vocabs, torch::Device _device):
-            _model {_model}, _lm_head {lm_head}, _vocabs{_vocabs}, _device{_device}
-        {
-            if (_vocabs.size() != 2){
-                throw std::invalid_argument("Vocab size must be 2, but found " + _vocabs.size());
-            }
-        }
-
-        auto greedy_decode(str src, i32 max_len=128) -> str{
-            auto src_vocab = _vocabs[0];
-            auto tgt_vocab = _vocabs[1];
-            vector<int> src_ids_vec = _vocabs[0]->EncodeAsIds(src);
-            auto src_ids = torch::tensor(src_ids_vec, torch::dtype(torch::kInt64).device(_device)).unsqueeze(0); // [1, src_len]
-
-            auto src_mask = (src_ids == src_vocab->pad_id()).unsqueeze(0).unsqueeze(1); // [batch=1, 1, 1, src_len]  
-            auto memory = _model ->encoder(src_ids, src_mask);
-            std::cerr << "src: " << utils::tensor_shape(src_ids) << "; mask:" << utils::tensor_shape(src_mask) 
-                << "; memory: " << utils::tensor_shape(memory) << std::endl;
-            
-            auto tgt_ids = torch::full({src_ids.size(0), 1}, tgt_vocab->bos_id(), torch::dtype(torch::kInt64).device(_device));
-            for (int i=0; i < max_len; i++){
-                auto tgt_mask = subsequent_mask(tgt_ids.size(1), _device).unsqueeze(0).unsqueeze(1);  // [batch=1, head=1, tgt_len, tgt_len]
-                std::cerr << "src_mem: " << utils::tensor_shape(memory) << "; src_mask:" << utils::tensor_shape(src_mask) 
-                << "; tgt_ids: " << utils::tensor_shape(tgt_ids) << "; tgt_mask: " << utils::tensor_shape(tgt_mask) << std::endl;
-                auto features = _model->decoder(tgt_ids, memory, tgt_mask, src_mask);
-                features = features.index({Slice(), -1, Slice()});
-                auto output = _lm_head.forward(features);
-                auto next_token = output.argmax(-1);
-                std::cerr << "next_token: " << next_token << std::endl;
-
-                // TODO max and compute score
-                tgt_ids = torch::cat({tgt_ids, next_token}, 1);
-                // TODO: Halt on EOS
-            }
-            std::vector<int> tgt_ids_vec(tgt_ids.data_ptr<i64>(), tgt_ids.data_ptr<i64>() + tgt_ids.numel());
-            auto tgt_tokens = _vocabs[1]->DecodeIds(tgt_ids_vec);
-            return tgt_tokens;
-        }
-    };
 
     template <typename M>
     class Trainer {
@@ -111,7 +64,7 @@ namespace rtg::train {
             _bos_id {_data_loader.vocabs[1]->bos_id()},
             _loss_computer{  init_loss_computer(_config, _projector, _pad_id) },
 
-            _sample_batch{ _data_loader.get_samples(_config["validator"]["data"].as<vector<string>>(), 5) }
+            _sample_batch{ _data_loader.get_samples(_config["validator"]["data"].as<vector<string>>(), /*n_samples*/5) }
         {
             spdlog::info("Trainer initialized; work_dir={} device={}; fp16={}",
                 work_dir, _device == torch::kCUDA ? "cuda" : "cpu", _fp16_enabled);
@@ -130,15 +83,7 @@ namespace rtg::train {
 
         ~Trainer() {}
 
-        auto subsequent_mask(int64_t seq_len, torch::Device device = torch::kCPU) -> Tensor {
-            // batch: [batch_size, seq_len]
-            // pad_idx: padding token id; usually 0; ignore if -1
-            // returns: [batch_size, seq_len, seq_len]
-            auto mask = torch::ones({ seq_len, seq_len }, torch::dtype(torch::kInt8).device(device)); // all cells have 1
-            mask = torch::triu(mask, /*diagonal=*/1);            // upper triangle and diagonal are 1, lower diagonal are 0
-            return mask;
-        }
-
+     
         auto save_checkpoint(string tag = "") {
             auto filename = fmt::format("model{}.pt", tag.size() > 0 ? "." + tag : "");
             auto checkpoint_file = _work_dir / filename;
@@ -163,8 +108,8 @@ namespace rtg::train {
             auto tgt_mask_autoreg = subsequent_mask(tgt_ids.size(1), _device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len] 
             auto tgt_mask = tgt_mask_padding | tgt_mask_autoreg.type_as(tgt_mask_padding); // [batch_size, 1, seq_len, seq_len]
             auto normalizer = (tgt_ids != _pad_id).sum().item().toInt(); // #total - #mask
-            auto output = _model(src_ids, tgt_ids, src_mask, tgt_mask);
-            auto loss = _loss_computer->compute(output, tgt_ids, normalizer, mode);
+            auto features = _model(src_ids, src_mask, tgt_ids, tgt_mask);
+            auto loss = _loss_computer->compute(features, tgt_ids, normalizer, mode);
 
             if (_fp16_enabled) {  // __exit__()
                 at::autocast::clear_cache();
@@ -221,8 +166,8 @@ namespace rtg::train {
         }
 
         void log_samples(){
-            auto decoder = Decoder(_model, _projector, _data_loader.vocabs, _device);
-           for (auto i=0; i < _sample_batch.size(); i++) {
+            auto decoder = inference::Decoder(_model, _projector, _data_loader.vocabs, _device);
+            for (auto i=0; i < _sample_batch.size(); i++) {
                 auto ex = _sample_batch.examples[i];
                 str src = ex.fields[0];
                 str ref = ex.fields[1];
@@ -230,13 +175,13 @@ namespace rtg::train {
                 spdlog::info("[{}] REF: {}", i, ref);
                 str hyp = decoder.greedy_decode(src);
                 spdlog::info("[{}] HYP: {}", i, hyp);
-           }
+            }
         }
 
-        auto validate(bool show_samples=false) -> float {
+        auto validate(bool show_samples=true) -> float {
             torch::AutoGradMode enable_grad(false);
             _model->eval();
-             if (show_samples) {
+            if (show_samples) {
                 log_samples();
             }
             auto log_frequency = _config["validator"]["log_frequency"].as<string>("5000u");
@@ -245,7 +190,6 @@ namespace rtg::train {
             for (auto batch : _data_loader.get_validation_data()) {
                 step(batch, stats, Mode::INFERENCE);
             }
-           
             LOG::info("Validation finished. Avg loss: {:.5f}", stats.avg_loss());
             return stats.avg_loss();
         }

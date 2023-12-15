@@ -51,13 +51,13 @@ namespace rtg::model {
             lm_head { register_module("lm_head", nn::Linear(nn::LinearOptions(model_dim, tgt_vocab_size))) }
         {}
 
-        auto forward(torch::Tensor& src, torch::Tensor& tgt, 
-            torch::Tensor& src_mask, torch::Tensor& tgt_mask) -> torch::Tensor {
+        auto forward(torch::Tensor& src, torch::Tensor& src_mask,
+                    torch::Tensor& tgt, torch::Tensor& tgt_mask) -> torch::Tensor {
             // src: [batch_size, src_len]
             // tgt: [batch_size, tgt_len]
             // return: [batch_size, tgt_len, tgt_vocab_size]
             auto memory = encoder(src, src_mask); // [batch_size, src_len, model_dim]
-            auto output = decoder(tgt, memory, tgt_mask, src_mask); // [batch_size, tgt_len, model_dim]
+            auto output = decoder(memory, src_mask, tgt, tgt_mask); // [batch_size, tgt_len, model_dim]
             //output = lm_head(output); // [batch_size, tgt_len, tgt_vocab_size]
             return output;
         }

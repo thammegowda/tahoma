@@ -127,7 +127,7 @@ namespace rtg::train {
     }
 
 
-    auto subsequent_mask(int64_t seq_len, torch::Device device = torch::kCPU) -> Tensor {
+    auto subsequent_mask(i64 seq_len, torch::Device device = torch::kCPU) -> Tensor {
         // input: seq_len
         // pad_idx: padding token id; usually 0; ignore if -1
         // returns: [seq_len, seq_len]

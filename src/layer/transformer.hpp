@@ -156,12 +156,11 @@ namespace rtg::layer {
             // src_mask: [batch_size, 1, src_len]
             // return: [batch_size, src_len, model_dim]
 
-            auto src2 = std::get<0>(
-                self_attn(src, src, src, src_mask)); // [batch_size, src_len, model_dim]
+            auto src2 = std::get<0>(self_attn(src, src, src, src_mask)); // [batch_size, src_len, model_dim]
             src = src + dropout1(src2);
             src = norm1(src);
 
-            src2 = fc2(F::relu(fc1(src))); // [batch_size, src_len, model_dim]
+            src2 = fc2(F::gelu(fc1(src))); // [batch_size, src_len, model_dim]
             src = src + dropout2(src2);
             src = norm2(src);
             return src;
@@ -248,14 +247,15 @@ namespace rtg::layer {
         {
         }
 
-        auto forward(torch::Tensor& tgt, torch::Tensor& memory,
-             torch::Tensor& tgt_mask, torch::Tensor& memory_mask) -> torch::Tensor {
+        auto forward(torch::Tensor& memory, torch::Tensor& memory_mask, 
+                    torch::Tensor& tgt, torch::Tensor& tgt_mask) -> torch::Tensor {
             // tgt: [batch_size, tgt_len, model_dim]
             // memory: [batch_size, src_len, model_dim]
             // tgt_mask: [batch_size, 1, tgt_len]
             // memory_mask: [batch_size, 1, src_len]
             // return
 
+            // query, key, value, key_value_mask
             auto x = tgt;
             auto x2 = std::get<0>(self_attn(x, x, x, tgt_mask)); // [batch_size, tgt_len, model_dim]
             x = x + dropout1(x2);
@@ -265,7 +265,7 @@ namespace rtg::layer {
             x = x + dropout2(x2);
             x = norm2(x);
 
-            x2 = fc2(F::relu(fc1(x))); // [batch_size, tgt_len, model_dim]
+            x2 = fc2(F::gelu(fc1(x))); // [batch_size, tgt_len, model_dim]
             x = x + dropout3(x2);
             x = norm3(x);
             return x;
@@ -300,8 +300,8 @@ namespace rtg::layer {
             }
         }
 
-        auto forward(torch::Tensor& tgt, torch::Tensor& memory, torch::Tensor& tgt_mask,
-            torch::Tensor& memory_mask) -> torch::Tensor {
+        auto forward(torch::Tensor& memory, torch::Tensor& memory_mask,
+                    torch::Tensor& tgt, torch::Tensor& tgt_mask) -> torch::Tensor {
             // tgt: [batch_size, tgt_len]
             // memory: [batch_size, src_len, model_dim]
             // tgt_mask: [batch_size, 1, tgt_len]
@@ -314,7 +314,7 @@ namespace rtg::layer {
             x = norm1(x);
 
             for (int i = 0; i < num_layers; ++i) {
-                x = layers->at<TransformerDecoderLayerImpl>(i).forward(x, memory, tgt_mask, memory_mask);
+                x = layers->at<TransformerDecoderLayerImpl>(i).forward(memory, memory_mask, x, tgt_mask);
             }
             //x = lm_head(x); // [batch_size, tgt_len, vocab_size]
             return x;
