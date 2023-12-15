@@ -61,7 +61,7 @@ trainer:
 
 
 validator:
-  frequency: 500
+  frequency: 50
   data:
     - data/dev.kan
     - data/dev.eng

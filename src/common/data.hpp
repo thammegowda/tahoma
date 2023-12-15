@@ -85,7 +85,6 @@ namespace rtg::data {
             }
         }
 
-
         static vector<torch::Tensor> to_tensors(vector<Example> examples) {
             /**
              * Convert a buffer of Examples to a Batch
@@ -133,6 +132,10 @@ namespace rtg::data {
             return *this;
         }
 
+        auto size() -> int32_t {
+            return examples.size();
+        }
+
         ~Batch() {}
     };
 
@@ -176,21 +179,12 @@ namespace rtg::data {
 
         ~DataLoader() {}
 
-        auto read_examples(vector<string> data_paths, vector<size_t> max_length,
-                bool max_length_crop=true) -> std::generator<data::Example> {
-            LOG::info("Loading data from {}", fmt::join(data_paths, ", "));
-            if (data_paths.empty()) {
+        auto read_lines(vector<string> data_paths) -> std::generator<vector<string>> {
+             if (data_paths.empty()) {
                 throw runtime_error("No data files specified");
             }
-            if (max_length_crop){
-                if(max_length.size() != data_paths.size()) {
-                    throw runtime_error("max_length must be of the same size as data_paths");
-                }
-                LOG::info("Length cropping is enabled. max_length: {}", fmt::join(max_length, ", "));
-            } else {
-                LOG::info("Length cropping is disabled. Currently long examples are NOT skipped and hence may cause OOM");
-            }
-            const int32_t num_fields = data_paths.size();
+            LOG::info("Loading data from {}", fmt::join(data_paths, ", "));
+            const i32 num_fields = data_paths.size();
             vector<ifstream> files(num_fields);
             for (size_t i = 0; i < num_fields; ++i) {
                 files[i].open(data_paths[i]);
@@ -199,48 +193,67 @@ namespace rtg::data {
                 }
             }
 
-            bool contiguous = true;
-            vector<string> fields;
-            vector<vector<int32_t>> field_ids;
-            int64_t rec_num = 0;
             bool has_data = true;
+            int64_t rec_num = 0;
             do {
-                fields = vector<string>(num_fields);
-                field_ids = vector<vector<int32_t>>(num_fields);
+                auto fields = vector<string>(num_fields);
+                rec_num++;
                 for (size_t i = 0; i < num_fields; i++) {
                     if (!getline(files[i], fields[i])) {
                         has_data = false;
                         break;
                     }
                     if (fields[i].empty()) {
-                        throw runtime_error("Empty line in file: " + data_paths[i] + " at line: " + std::to_string(rec_num + 1));
+                        throw runtime_error("Empty line in file: " + data_paths[i] + " at line: " + std::to_string(rec_num));
                     }
                 }
 
                 if (has_data) {
-                    bool skip = false;
-                    for (size_t i = 0; i < num_fields; ++i) {
-                        auto ids = vocabs[i]->EncodeAsIds(fields[i]);
-                        if (max_length_crop && ids.size() > max_length[i]) {
-                            ids = vector<int32_t>(ids.begin(), ids.begin() + max_length[i]);
-                        }
-                        skip = skip || ids.empty();
-                        field_ids[i] = ids;
-                    }
-                    if (skip) {
-                        spdlog::warn("Skipping empty record {}", rec_num);
-                        continue;
-                    }
-                    co_yield data::Example(rec_num, fields, field_ids);
-                    rec_num++;
+                    co_yield fields;
                 }
             } while (has_data);
 
-            // I wish there was a finally{} block to guarantee file closure :(
+            // wish there was a finally{} block to guarantee file closure :(
             for (auto& file : files) {
                 file.close();
             }
             spdlog::debug("Reached the end of data files");
+        }
+
+        auto read_examples(std::generator<vector<string>> rows, vector<size_t> max_length,
+                bool max_length_crop=true) -> std::generator<data::Example> {
+            i32 num_fields = -1;
+            i64 rec_num = 0;
+            for (auto fields: rows) {
+                if (num_fields < 0) {
+                    num_fields = fields.size(); // initialize on first run
+                    if (max_length_crop){
+                        if(max_length.size() != num_fields) {
+                            throw runtime_error("max_length must be of the same size as data_paths");
+                        }
+                        LOG::info("Length cropping is enabled. max_length: {}", fmt::join(max_length, ", "));
+                    }
+                }
+                if (fields.size() != num_fields) {
+                    throw runtime_error(fmt::format("All data files must have the same number of fields. Record number {} has {} fields, expected {}", rec_num, fields.size(), num_fields));
+                }
+                bool skip = false;
+                auto field_ids = vector<vector<int32_t>>(num_fields);
+                 for (size_t i = 0; i < num_fields; ++i) {
+                    auto ids = vocabs[i]->EncodeAsIds(fields[i]);
+                    if (max_length_crop && ids.size() > max_length[i]) {
+                        ids = vector<int32_t>(ids.begin(), ids.begin() + max_length[i]);
+                    }
+                    skip = skip || ids.empty();
+                    field_ids[i] = ids;
+                }
+                if (skip) {
+                    spdlog::warn("Skipping empty record {}", rec_num);
+                    continue;
+                }
+                co_yield data::Example(rec_num, fields, field_ids);
+                rec_num++;
+            }            
         }
 
         auto make_batches(std::generator<data::Example> examples, size_t batch_size,
@@ -260,7 +273,6 @@ namespace rtg::data {
         }
 
         auto get_train_data(size_t n_data_threads=1) -> generator<data::Batch> {
-       
             if (n_data_threads >= 1) { // asynchronous, on a separate thread
                 LOG::info("Using async loader with {} data threads", n_data_threads);
                 // TODO: support multiple threads
@@ -277,20 +289,33 @@ namespace rtg::data {
             return get_data_sync("validator", "trainer");
         }
 
+        auto get_samples(vector<string> data_paths, i32 num_samples) -> data::Batch {
+            assert (num_samples > 0);
+            auto samples = rtg::utils::sample_n_items<vector<string>>(read_lines(data_paths), num_samples);
+            auto examples = read_examples(std::move(samples), {}, false);
+            auto batches = make_batches(std::move(examples), num_samples);
+            for (auto batch: batches){
+                return batch; // first batch
+            }
+            throw runtime_error("No samples found");
+        }
+
         auto get_data_sync(string dataset_name, string fallback_name="trainer") -> std::generator<data::Batch> {
             auto data_paths = config[dataset_name]["data"].as<vector<string>>();
-
             // try to locate bacth_size in the dataset_name, else fallback to trainer 
             auto batch_size = config[dataset_name]["batch_size"].as<int>(config[fallback_name]["batch_size"].as<int>());
             auto max_length_crop = config[dataset_name]["max_length_crop"].as<bool>(config[fallback_name]["max_length_crop"].as<bool>(true));
             auto max_length = config[dataset_name]["max_length"].as<vector<size_t>>(config[fallback_name]["max_length"].as<vector<size_t>>());
-            return make_batches(read_examples(data_paths, max_length, max_length_crop), batch_size);
+            auto lines = read_lines(data_paths);
+            auto examples = read_examples(std::move(lines), max_length, max_length_crop);
+            auto batches = make_batches(std::move(examples), batch_size);
+            return batches;
         }
 
         auto get_data_async(string dataset_name) -> generator<data::Batch> {
 
             auto data_paths = this->config[dataset_name]["data"].as<vector<string>>();
-            auto batch_size = this->config[dataset_name]["batch_size"].as<int>();
+            auto batch_size = this->config[dataset_name]["batch_size"].as<i32>();
             auto max_length_crop = this->config[dataset_name]["max_length_crop"].as<bool>(true);
             auto max_length = this->config[dataset_name]["max_length"].as<vector<size_t>>();
 
@@ -302,9 +327,9 @@ namespace rtg::data {
             size_t thread_sleep_ms = 4;  // in ms
 
             std::thread producer_thread([&] { 
-                auto batches = make_batches(
-                    read_examples(data_paths, max_length, max_length_crop),
-                    batch_size);
+                auto lines = read_lines(data_paths);
+                auto examples = read_examples(std::move(lines), max_length, max_length_crop);
+                auto batches = make_batches(std::move(examples), batch_size);
                 for (auto batch : batches) {
                     while (queue.size() >= max_queue_size) {
                         // wait for the queue to drain

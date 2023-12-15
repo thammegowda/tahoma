@@ -103,7 +103,11 @@ namespace rtg::layer {
             if (key_padding_mask.defined()) {
                 // insert head dim
                 //key_padding_mask = key_padding_mask.unsqueeze(1); // [batch_size, 1, 1, src_len]
-                assert(key_padding_mask.sizes().size() == 4); // must be a 4D tensor
+                if (key_padding_mask.sizes().size() != 4){ // must be a 4D tensor
+                    string _shape = ""; 
+                    for (auto i : key_padding_mask.sizes()) { _shape += std::to_string(i) + ", "; }
+                    throw std::runtime_error("key_padding_mask must be a 4D tensor. given: [" +  _shape + "]");
+                }
                 float low_val = -1e9;
                 if (at::autocast::is_enabled()) {
                     low_val = -pow(2, 14);   // -16384.0f; TODO: check for bf16

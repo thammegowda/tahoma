@@ -16,7 +16,7 @@ using namespace rtg;
 using namespace torch::indexing;
 using namespace rtg::layer;
 
-namespace rtg::nmt::transformer {
+namespace rtg::model {
 
     struct TransformerNMTImpl : public nn::Module {
         int src_vocab_size;

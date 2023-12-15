@@ -32,7 +32,7 @@ namespace rtg::train {
         auto model_type = config["model"]["name"].as<string>();
         if (model_type == "transformer") {
             YAML::Node model_args = config["model"]["args"];
-            auto model = nmt::transformer::TransformerNMT(model_args);
+            auto model = model::TransformerNMT(model_args);
             return model;
         }
         else {
@@ -128,9 +128,9 @@ namespace rtg::train {
 
 
     auto subsequent_mask(int64_t seq_len, torch::Device device = torch::kCPU) -> Tensor {
-        // batch: [batch_size, seq_len]
+        // input: seq_len
         // pad_idx: padding token id; usually 0; ignore if -1
-        // returns: [batch_size, seq_len, seq_len]
+        // returns: [seq_len, seq_len]
         auto mask = torch::ones({ seq_len, seq_len }, torch::dtype(torch::kInt8).device(device)); // all cells have 1
         mask = torch::triu(mask, /*diagonal=*/1);            // upper triangle and diagonal are 1, lower diagonal are 0
         return mask;
