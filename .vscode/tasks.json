@@ -1,0 +1,20 @@
+{
+	"tasks": [
+		{
+			"type": "shell",
+			"label": "build-full",
+			"command": "mkdir -p build-debug && cd build-debug && cmake -DUSE_CUDA=on .. && make -j",
+			"problemMatcher": [
+				"$gcc"
+			]
+		},
+		{
+			"type": "shell",
+			"label": "build-quick",
+			"command": "cd build-debug && make -j",
+			"problemMatcher": [
+				"$gcc"
+			]
+		}
+	]
+}
