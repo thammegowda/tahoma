@@ -12,11 +12,11 @@
 
 namespace nn = torch::nn;
 namespace F = torch::nn::functional;
-using namespace rtg;
+using namespace tahoma;
 using namespace torch::indexing;
 
 
-namespace rtg::layer {
+namespace tahoma::layer {
 
     // TODO: split this into a separate separate position+word embeddings
     struct AbsolutePositionEmbeddingImpl : nn::Module {

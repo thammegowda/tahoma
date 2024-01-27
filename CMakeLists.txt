@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25.2 FATAL_ERROR)  
 # older cmake doesnt support CUDA_STANDARD 20
-project(rtgp CXX C)
+project(tahoma CXX C)
 set(CMAKE_CXX_STANDARD 23)  # cuda doesnt support c++23 yet
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set (CMAKE_CUDA_STANDARD 20) 
@@ -20,6 +20,17 @@ set(PYTHON_EXECUTABLE python CACHE FILEPATH "Python executable name path. Used t
 find_package(Git QUIET)
 
 set(CMAKE_BUILD_TYPE Debug)
+
+# run git submodule update --init --recursive
+execute_process(
+    COMMAND git submodule update --init --recursive --no-fetch
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+execute_process(
+    COMMAND bash  ${CMAKE_SOURCE_DIR}/libs/setup.sh
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
 
 if (USE_CUDA)
     set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cu121" CACHE PATH "libTorch CUDA path")

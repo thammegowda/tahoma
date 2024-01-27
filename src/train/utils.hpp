@@ -8,7 +8,7 @@
 #include <torch/torch.h>
 #include <sentencepiece_processor.h>
 
-#include <rtg.hpp>
+#include <tahoma.hpp>
 #include "../common/config.hpp"
 #include "../common/data.hpp"
 #include "./loss_computer.hpp"
@@ -23,9 +23,9 @@ namespace fs = std::filesystem;
 
 using namespace std;
 using namespace torch::indexing;
-using namespace rtg;
+using namespace tahoma;
 
-namespace rtg::train {
+namespace tahoma::train {
 
     template <typename M>
     auto init_model(config::Config& config, torch::Device& device) -> M {
@@ -177,5 +177,5 @@ namespace rtg::train {
         }
     };
 
-} // namespace rtg::train
+} // namespace tahoma::train
 

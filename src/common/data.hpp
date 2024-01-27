@@ -14,7 +14,7 @@
 #include <__generator.hpp>  //reference implementation of generator
 #include <torch/torch.h>
 #include <sentencepiece_processor.h>
-#include <rtg.hpp>
+#include <tahoma.hpp>
 #include "config.hpp"
 #include "utils.hpp"
 
@@ -26,9 +26,9 @@ namespace sp = sentencepiece;
 
 using namespace std;
 using namespace torch::indexing;
-using namespace rtg;
+using namespace tahoma;
 
-namespace rtg::data {
+namespace tahoma::data {
 
     struct Example {
 
@@ -291,7 +291,7 @@ namespace rtg::data {
 
         auto get_samples(vector<string> data_paths, i32 num_samples) -> data::Batch {
             assert (num_samples > 0);
-            auto samples = rtg::utils::sample_n_items<vector<string>>(read_lines(data_paths), num_samples);
+            auto samples = tahoma::utils::sample_n_items<vector<string>>(read_lines(data_paths), num_samples);
             auto examples = read_examples(std::move(samples), {}, false);
             auto batches = make_batches(std::move(examples), num_samples);
             for (auto batch: batches){

@@ -34,7 +34,7 @@ struct fmt::formatter<fs::path> {
 };
 
 
-namespace rtg {
+namespace tahoma {
     
     namespace LOG = spdlog;
     using namespace std;
@@ -77,7 +77,7 @@ namespace rtg {
     };
     
 
-} // namespace rtg
+} // namespace tahoma
 
 
 

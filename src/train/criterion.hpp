@@ -1,7 +1,7 @@
 #pragma once
 
 #include <optional>
-#include <rtg.hpp>
+#include <tahoma.hpp>
 #include <torch/torch.h>
 
 
@@ -11,7 +11,7 @@ namespace F = torch::nn::functional;
 using namespace torch::indexing;
 
 
-namespace rtg::train {
+namespace tahoma::train {
 
     enum DataType {
         LOGITS,

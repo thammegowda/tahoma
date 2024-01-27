@@ -5,16 +5,16 @@
 #include <memory>
 #include <optional>
 #include <sentencepiece_processor.h>
-#include <rtg.hpp>
+#include <tahoma.hpp>
 
 #include "../common/config.hpp"
 #include "../common/data.hpp"
 #include "./criterion.hpp"
 
-using namespace rtg;
+using namespace tahoma;
 
 
-namespace rtg::train {
+namespace tahoma::train {
 
       struct CriteriaContainer {
         nn::AnyModule train; // a single criterion for training

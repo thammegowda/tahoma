@@ -6,10 +6,10 @@
 #include <vector>
 #include <type_traits>
 #include <yaml-cpp/yaml.h>
-#include <rtg.hpp>
+#include <tahoma.hpp>
 
 
-namespace rtg::config {
+namespace tahoma::config {
 
     class Config: public YAML::Node {
     
@@ -40,4 +40,4 @@ namespace rtg::config {
 
     };
     
-} // namespace rtg::config
+} // namespace tahoma::config

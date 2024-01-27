@@ -5,17 +5,17 @@
 
 
 
-namespace rtg::inference {
+namespace tahoma::inference {
 
     
     class Decoder {
     private:
-        rtg::model::TransformerNMT _model;
+        tahoma::model::TransformerNMT _model;
         nn::AnyModule _lm_head;
         vector<shared_ptr<sp::SentencePieceProcessor>> _vocabs;
         torch::Device _device;
     public:
-        Decoder(rtg::model::TransformerNMT _model, nn::AnyModule lm_head, vector<shared_ptr<sp::SentencePieceProcessor>> _vocabs, torch::Device _device):
+        Decoder(tahoma::model::TransformerNMT _model, nn::AnyModule lm_head, vector<shared_ptr<sp::SentencePieceProcessor>> _vocabs, torch::Device _device):
             _model {_model}, _lm_head {lm_head}, _vocabs{_vocabs}, _device{_device}
         {
             if (_vocabs.size() != 2){
@@ -35,7 +35,7 @@ namespace rtg::inference {
             auto tgt_ids = torch::full({src_ids.size(0), 1}, tgt_vocab->bos_id(), torch::dtype(torch::kInt64).device(_device));
             for (int i=0; i < max_len; i++){
                 auto tgt_len = tgt_ids.size(1);
-                auto tgt_mask = rtg::train::subsequent_mask(tgt_len, _device).to(torch::kBool).view({1, 1, tgt_len, tgt_len});  // [batch=1, head=1, tgt_len, tgt_len]
+                auto tgt_mask = tahoma::train::subsequent_mask(tgt_len, _device).to(torch::kBool).view({1, 1, tgt_len, tgt_len});  // [batch=1, head=1, tgt_len, tgt_len]
                 auto features = _model->decoder(memory, src_mask, tgt_ids, tgt_mask);
                 features = features.index({Slice(), -1, Slice()});
                 auto output = _lm_head.forward(features);

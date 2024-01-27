@@ -12,11 +12,11 @@
 
 namespace nn = torch::nn;
 namespace F = torch::nn::functional;
-using namespace rtg;
+using namespace tahoma;
 using namespace torch::indexing;
-using namespace rtg::layer;
+using namespace tahoma::layer;
 
-namespace rtg::model {
+namespace tahoma::model {
 
     struct TransformerNMTImpl : public nn::Module {
         int src_vocab_size;

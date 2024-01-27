@@ -5,14 +5,18 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(gdb launch) rtg",
+            "name": "(gdb launch) tahoma",
             "preLaunchTask": "build-quick", // or build-full
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build-debug/rtgp",
-            "args": [],
+            "args": [
+                "${workspaceFolder}/runs/01-tfm",
+                "-c",
+                "${workspaceFolder}/examples/nmt/transformer.yaml"
+            ],
             "stopAtEntry": false,
-            "cwd": "${fileDirname}",
+            "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",

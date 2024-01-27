@@ -1,11 +1,12 @@
-build/
-build-debug/
+build*
 libs/libtorch*
+data
 data/*
 !data/setup.sh
 
 .history*
 **.zip
 **.so
+runs/*
 
 .vscode/settings.json

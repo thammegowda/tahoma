@@ -11,7 +11,7 @@ namespace optim = torch::optim;
 using namespace std;
 using namespace chrono;
 
-namespace rtg::train {
+namespace tahoma::train {
 
     struct StatsCounter {
         int64_t step_num = 0;

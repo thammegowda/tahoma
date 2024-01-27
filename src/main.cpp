@@ -1,5 +1,5 @@
 #include <iostream>
-#include <rtg.hpp>
+#include <tahoma.hpp>
 
 // rename main as trainer_main 
 #define main trainer_main
@@ -8,7 +8,7 @@
 
 
 int main(int argc, char* argv[]) {
-    using namespace rtg;
+    using namespace tahoma;
     int _code = global_setup();
     if (_code != 0){
         return _code;

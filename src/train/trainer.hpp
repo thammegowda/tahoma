@@ -12,7 +12,7 @@
 #include <torch/torch.h>
 #include <sentencepiece_processor.h>
 
-#include <rtg.hpp>
+#include <tahoma.hpp>
 #include "../common/config.hpp"
 #include "../common/data.hpp"
 #include "../model/transformer_nmt.hpp"
@@ -27,10 +27,10 @@ namespace fs = std::filesystem;
 
 using namespace std;
 using namespace torch::indexing;
-using namespace rtg;
+using namespace tahoma;
 using namespace chrono;
 
-namespace rtg::train {
+namespace tahoma::train {
 
     template <typename M>
     class Trainer {
@@ -41,7 +41,7 @@ namespace rtg::train {
         nn::AnyModule _projector;
         shared_ptr<optim::Optimizer> _optimizer;
         shared_ptr<train::LRScheduler> _scheduler;
-        rtg::data::DataLoader _data_loader;
+        tahoma::data::DataLoader _data_loader;
 
         bool _fp16_enabled;
         int64_t _pad_id = 0;
@@ -59,7 +59,7 @@ namespace rtg::train {
             _projector{ _model->lm_head },
             _optimizer{ init_optimizer(_config, _model) },
             _scheduler{ init_scheduler(_config, *_optimizer) },
-            _data_loader{ rtg::data::DataLoader(_config) },
+            _data_loader{ tahoma::data::DataLoader(_config) },
             _fp16_enabled{ _config["trainer"]["fp16"].as<bool>(false) },
             _pad_id {_data_loader.vocabs[1]->pad_id()},   //vocabs[1] is the target vocab
             _bos_id {_data_loader.vocabs[1]->bos_id()},
@@ -72,7 +72,7 @@ namespace rtg::train {
             if (torch::cuda::is_available()) {
                 vector<string> device_ids;
                 for (auto i=0; i < torch::cuda::device_count(); i++){
-                    device_ids.push_back(fmt::format("{} ", i));
+                    device_ids.push_back(fmt::format("{}", i));
                 }
                 spdlog::info("CUDA devices: {}", fmt::join(device_ids, ", "));
                 spdlog::info("Early stopping enabled? {}, patience: {}",  _stopper.patience > 0 ? "Yes" : "No",  _stopper.patience);
