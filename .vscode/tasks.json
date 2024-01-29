@@ -3,15 +3,19 @@
 		{
 			"type": "shell",
 			"label": "build-full",
-			"command": "mkdir -p build-debug && cd build-debug && cmake -DUSE_CUDA=on .. && make -j",
+			"command": "cmake . -Bbuild-debug -DUSE_CUDA=on && cmake -B build-debug -j",
 			"problemMatcher": [
 				"$gcc"
-			]
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
 		},
 		{
 			"type": "shell",
 			"label": "build-quick",
-			"command": "cd build-debug && make -j",
+			"command": "cmake --build build-debug -j",
 			"problemMatcher": [
 				"$gcc"
 			]

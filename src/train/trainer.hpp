@@ -75,7 +75,11 @@ namespace tahoma::train {
                     device_ids.push_back(fmt::format("{}", i));
                 }
                 spdlog::info("CUDA devices: {}", fmt::join(device_ids, ", "));
-                spdlog::info("Early stopping enabled? {}, patience: {}",  _stopper.patience > 0 ? "Yes" : "No",  _stopper.patience);
+            }
+            spdlog::info("Early stopping enabled? {}, patience: {}",  _stopper.patience > 0 ? "Yes" : "No",  _stopper.patience);
+            // check if pad_id is correct
+            if (_pad_id < 0){
+                throw std::runtime_error("pad_id is negative, implying it is disabled, however it is required. Please create a new vocab with pad_id.");
             }
         }
 
@@ -104,14 +108,35 @@ namespace tahoma::train {
             auto tgt_ids = batch.fields[1];   // [batch_size, seq_len]
             //FIME: add bos and eos tokens to tgt_ids. Offset tgt_ids by 1
             auto _bos_col = torch::full({ tgt_ids.size(0), 1 }, _bos_id, torch::dtype(torch::kInt64).device(_device));
-            tgt_ids = torch::cat({_bos_col, tgt_ids}, 1);
+            auto bos_tgt_ids = torch::cat({_bos_col, tgt_ids}, 1);
             
-            auto src_mask = (src_ids == _pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
-            auto tgt_mask_padding = (tgt_ids == _pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len] 
-            auto tgt_mask_autoreg = subsequent_mask(tgt_ids.size(1), _device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len] 
+            auto src_mask = src_ids.eq(_pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
+            auto tgt_mask_padding = bos_tgt_ids.eq(_pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len] 
+            auto tgt_mask_autoreg = subsequent_mask(bos_tgt_ids.size(1), _device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len] 
             auto tgt_mask = tgt_mask_padding | tgt_mask_autoreg.type_as(tgt_mask_padding); // [batch_size, 1, seq_len, seq_len]
-            auto normalizer = (tgt_ids != _pad_id).sum().item().toInt(); // #total - #mask
-            auto features = _model(src_ids, src_mask, tgt_ids, tgt_mask);
+            auto normalizer = (bos_tgt_ids != _pad_id).sum().item().toInt(); // #total - #mask
+
+            bool debug_input = false;
+            if (debug_input) {
+                // print batch for debugging
+                for (auto i=0; i <batch.examples.size(); i++){
+                    auto ex = batch.examples[i];
+                    str src = ex.fields[0];
+                    str ref = ex.fields[1];
+                    std::cout << "SRC: " << src << std::endl;
+                    std::cout << "REF: " << ref << std::endl;
+                }
+                std::cout << "src_ids: " << src_ids << std::endl;
+                std::cout << "bos_tgt_ids: " << bos_tgt_ids << std::endl;
+                std::cout << "pad_id: " << _pad_id << std::endl;
+                std::cout << "src_mask: " << src_mask << std::endl;
+                std::cout << "tgt_mask: " << tgt_mask << std::endl;
+                std::cout << "normalizer: " << normalizer << std::endl;
+            }
+
+            auto features = _model(src_ids, src_mask, bos_tgt_ids, tgt_mask);
+            // skip the last token (EOS) in features, as it is not used in loss computation
+            features = features.index({ Slice(), Slice(0, -1), Slice() }); // [batch_size, seq_len, model_dim]
             auto loss = _loss_computer->compute(features, tgt_ids, normalizer, mode);
 
             if (_fp16_enabled) {  // __exit__()

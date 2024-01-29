@@ -7,7 +7,7 @@ set (CMAKE_CUDA_STANDARD 20)
 set (CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # set options with default values
-option(USE_CCACHE "Use ccache compiler cache (https://ccache.dev)" ON)
+option(USE_CCACHE "Use ccache compiler cache (https://ccache.dev)" OFF)
 option(USE_CUDA "Use CUDA libtorch. Default is CPU only libtorch" OFF)
 option(USE_ROCM "Use ROCM libtorch. Default is CPU only libtorch" OFF)
 option(USE_PYTORCH "Use libtorch from the available pytorch installation
@@ -20,6 +20,11 @@ set(PYTHON_EXECUTABLE python CACHE FILEPATH "Python executable name path. Used t
 find_package(Git QUIET)
 
 set(CMAKE_BUILD_TYPE Debug)
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -ggdb3 -O0")
+    message(STATUS "Debug build. Flags set to retain most debug info and disable all optimizations")
+endif()
+
 
 # run git submodule update --init --recursive
 execute_process(
@@ -49,6 +54,8 @@ elseif (USE_PYTORCH)
 else()
     # CPU only build by default
     set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cpu" CACHE PATH "libTorch CPU path")
+    # debug build here
+    #set(LIBTORCH_PATH "/mnt/home/tg/work/repos/other/pytorch/libtorch-cpu" CACHE PATH "libTorch CPU path")
 endif()
     
 message(STATUS "LIBTORCH_PATH: ${LIBTORCH_PATH}")

@@ -78,14 +78,18 @@ namespace tahoma::data {
         vector<torch::Tensor> fields = {};
 
         Batch(vector<Example> examples, bool contiguous = false)
-            : examples(examples)
-        {
+            : examples(examples) {
             if (contiguous) {
                 this->contiguous();
             }
         }
 
-        static vector<torch::Tensor> to_tensors(vector<Example> examples) {
+        /**
+         * Convert a buffer of Examples to a Batch
+         * @param examples: a buffer of Examples
+         * @return a Batch of tensors
+        */
+        static auto to_tensors(vector<Example> examples) -> vector<torch::Tensor>{
             /**
              * Convert a buffer of Examples to a Batch
             */
@@ -105,8 +109,8 @@ namespace tahoma::data {
             for (size_t i = 0; i < num_fields; ++i) {
                 fields[i] = torch::full({ batch_size, max_lens[i] }, pad_id, torch::kLong);
                 for (int32_t j = 0; j < examples.size(); ++j) {
-                    auto ids = torch::tensor(examples[j].field_ids[i], torch::kLong);
-                    fields[i].index_put_({ j, Slice(0,  examples[j].field_ids[i].size()) }, ids);
+                    fields[i].index_put_({ j, Slice(0, examples[j].field_ids[i].size()) }, 
+                        torch::tensor(examples[j].field_ids[i], torch::kLong));
                 }
             }
             return fields;
@@ -183,7 +187,7 @@ namespace tahoma::data {
              if (data_paths.empty()) {
                 throw runtime_error("No data files specified");
             }
-            LOG::info("Loading data from {}", fmt::join(data_paths, ", "));
+            LOG::debug("Loading data from {}", fmt::join(data_paths, ", "));
             const i32 num_fields = data_paths.size();
             vector<ifstream> files(num_fields);
             for (size_t i = 0; i < num_fields; ++i) {
@@ -224,6 +228,12 @@ namespace tahoma::data {
                 bool max_length_crop=true) -> std::generator<data::Example> {
             i32 num_fields = -1;
             i64 rec_num = 0;
+            vector<i32> eos_ids = {};
+            // iterate through vocabs and get eos_id for each vocab
+            for (auto vocab : vocabs) {
+                eos_ids.push_back(vocab->eos_id());
+            }
+
             for (auto fields: rows) {
                 if (num_fields < 0) {
                     num_fields = fields.size(); // initialize on first run
@@ -231,7 +241,7 @@ namespace tahoma::data {
                         if(max_length.size() != num_fields) {
                             throw runtime_error("max_length must be of the same size as data_paths");
                         }
-                        LOG::info("Length cropping is enabled. max_length: {}", fmt::join(max_length, ", "));
+                        LOG::debug("Length cropping is enabled. max_length: {}", fmt::join(max_length, ", "));
                     }
                 }
                 if (fields.size() != num_fields) {
@@ -241,6 +251,7 @@ namespace tahoma::data {
                 auto field_ids = vector<vector<int32_t>>(num_fields);
                  for (size_t i = 0; i < num_fields; ++i) {
                     auto ids = vocabs[i]->EncodeAsIds(fields[i]);
+                    ids.push_back(eos_ids[i]);  //  append token id
                     if (max_length_crop && ids.size() > max_length[i]) {
                         ids = vector<int32_t>(ids.begin(), ids.begin() + max_length[i]);
                     }
@@ -274,11 +285,11 @@ namespace tahoma::data {
 
         auto get_train_data(size_t n_data_threads=1) -> generator<data::Batch> {
             if (n_data_threads >= 1) { // asynchronous, on a separate thread
-                LOG::info("Using async loader with {} data threads", n_data_threads);
+                LOG::debug("Using async loader with {} data threads", n_data_threads);
                 // TODO: support multiple threads
                 return get_data_async("trainer");
             } else if (n_data_threads == 0) { // synchronous, on the same thread
-                LOG::info("Data loading on the main thread");
+                LOG::debug("Data loading on the main thread");
                 return get_data_sync("trainer");
             } else {
                 throw runtime_error("n_data_threads must be >= 1");

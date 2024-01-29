@@ -9,7 +9,7 @@
             "preLaunchTask": "build-quick", // or build-full
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build-debug/rtgp",
+            "program": "${workspaceFolder}/build-debug/tahoma",
             "args": [
                 "${workspaceFolder}/runs/01-tfm",
                 "-c",
