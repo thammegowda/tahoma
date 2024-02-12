@@ -195,8 +195,8 @@ namespace tahoma::train {
                 str ref = ex.fields[1];
                 spdlog::info("[{}] SRC: {}", i, src);
                 spdlog::info("[{}] REF: {}", i, ref);
-                str hyp = decoder.greedy_decode(src);
-                spdlog::info("[{}] HYP: {}", i, hyp);
+                auto [hyp, score] = decoder.greedy_decode(src);
+                spdlog::info("[{}] HYP: ({}) {}", i, score, hyp);
             }
         }
 
