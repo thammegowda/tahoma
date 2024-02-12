@@ -54,3 +54,7 @@ make -j
 
 * Install "C/C++ Extension Pack" by Microsoft
 * Search for "C++ Select Intellisense Configuration" and point to your C++ installation.
+
+## Build LibTorch from Source
+
+This project relies on libTorch. It'd be useful to know how to build libTorch

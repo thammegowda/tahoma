@@ -245,7 +245,8 @@ namespace tahoma::data {
                     }
                 }
                 if (fields.size() != num_fields) {
-                    throw runtime_error(fmt::format("All data files must have the same number of fields. Record number {} has {} fields, expected {}", rec_num, fields.size(), num_fields));
+                    throw runtime_error(fmt::format("All data files must have the same number of fields. \
+                        Record number {} has {} fields, expected {}", rec_num, fields.size(), num_fields));
                 }
                 bool skip = false;
                 auto field_ids = vector<vector<int32_t>>(num_fields);
@@ -264,9 +265,43 @@ namespace tahoma::data {
                 }
                 co_yield data::Example(rec_num, fields, field_ids);
                 rec_num++;
-            }            
+            }
         }
 
+        /**
+         * Shuffle examples in a buffer and yield them
+         * @param examples: a generator of examples
+         * @param buffer_size: the size of the buffer
+         * @return a generator of shuffled examples
+        */
+        auto buffered_shuffle(std::generator<data::Example> examples, size_t buffer_size) -> std::generator<data::Example> {
+            vector<data::Example> buffer;
+            for (auto ex : examples) {
+                buffer.push_back(ex);
+                if (buffer.size() >= buffer_size) {
+                    std::shuffle(buffer.begin(), buffer.end(), std::mt19937(std::random_device()()));
+                    for (auto ex : buffer) {
+                        co_yield ex;
+                    }
+                    buffer.clear();
+                }
+            }
+            if (!buffer.empty()) {
+                std::shuffle(buffer.begin(), buffer.end(), std::mt19937(std::random_device()()));
+                for (auto ex : buffer) {
+                    co_yield ex;
+                }
+            }
+        }
+
+        /**
+         * Make batches from examples
+         * @param examples: a generator of examples
+         * @param batch_size: the size of the batch
+         * @param contiguous: whether to make the batch contiguous
+         * @return a generator of batches
+         * @note: the last batch may be smaller than batch_size
+        */
         auto make_batches(std::generator<data::Example> examples, size_t batch_size,
             bool contiguous = false) -> std::generator<data::Batch> {
             // TODO: buffer and batch equal length examples to reduce padding
@@ -312,21 +347,25 @@ namespace tahoma::data {
         }
 
         auto get_data_sync(string dataset_name, string fallback_name="trainer") -> std::generator<data::Batch> {
+            // TODO remove this once async is stable and bug free
             auto data_paths = config[dataset_name]["data"].as<vector<string>>();
-            // try to locate bacth_size in the dataset_name, else fallback to trainer 
-            auto batch_size = config[dataset_name]["batch_size"].as<int>(config[fallback_name]["batch_size"].as<int>());
+            // try to locate batch_size in the dataset_name, else fallback to trainer
+            auto mini_batch = config[dataset_name]["mini_batch"].as<int>(config[fallback_name]["maxi_batch"].as<int>());
+            auto maxi_batch = config[dataset_name]["maxi_batch"].as<int>(config[fallback_name]["mini_batch"].as<int>());
             auto max_length_crop = config[dataset_name]["max_length_crop"].as<bool>(config[fallback_name]["max_length_crop"].as<bool>(true));
             auto max_length = config[dataset_name]["max_length"].as<vector<size_t>>(config[fallback_name]["max_length"].as<vector<size_t>>());
             auto lines = read_lines(data_paths);
             auto examples = read_examples(std::move(lines), max_length, max_length_crop);
-            auto batches = make_batches(std::move(examples), batch_size);
+            examples = buffered_shuffle(std::move(examples), mini_batch * maxi_batch);
+            auto batches = make_batches(std::move(examples), mini_batch);
             return batches;
         }
 
         auto get_data_async(string dataset_name) -> generator<data::Batch> {
 
             auto data_paths = this->config[dataset_name]["data"].as<vector<string>>();
-            auto batch_size = this->config[dataset_name]["batch_size"].as<i32>();
+            auto mini_batch = this->config[dataset_name]["mini_batch"].as<i32>();
+            auto maxi_batch = this->config[dataset_name]["maxi_batch"].as<i32>(1);
             auto max_length_crop = this->config[dataset_name]["max_length_crop"].as<bool>(true);
             auto max_length = this->config[dataset_name]["max_length"].as<vector<size_t>>();
 
@@ -337,10 +376,11 @@ namespace tahoma::data {
             size_t max_queue_size = 24;
             size_t thread_sleep_ms = 4;  // in ms
 
-            std::thread producer_thread([&] { 
+            std::thread producer_thread([&] {
                 auto lines = read_lines(data_paths);
                 auto examples = read_examples(std::move(lines), max_length, max_length_crop);
-                auto batches = make_batches(std::move(examples), batch_size);
+                examples = buffered_shuffle(std::move(examples), mini_batch * maxi_batch);
+                auto batches = make_batches(std::move(examples), mini_batch);
                 for (auto batch : batches) {
                     while (queue.size() >= max_queue_size) {
                         // wait for the queue to drain

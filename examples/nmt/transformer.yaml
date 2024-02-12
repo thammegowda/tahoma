@@ -20,11 +20,11 @@ optimizer:
     weight_decay: 0.0005
 
 scheduler:
-  name: noam 
+  name: noam
   args:
-    warmup_steps: 1000
+    warmup_steps: 16000
     model_dim: 512
-    constant: 2
+    constant: 1
 
 schema:
   fields:
@@ -37,9 +37,10 @@ schema:
 
 trainer:
   data:
-    - data/eng-deu/train.deu.100
-    - data/eng-deu/train.eng.100
-  batch_size: 2
+    - data/eng-deu/train.deu
+    - data/eng-deu/train.eng
+  mini_batch: 10
+  maxi_batch: 1000
   epochs: 100000
   max_length: &max_length
     - 512
@@ -48,8 +49,8 @@ trainer:
   fp16: true
   chunk_size: 8
   loader_threads: 2
-  #log_frequency: 50u
-  log_frequency: 1u
+  log_frequency: 50u
+  #log_frequency: 1u
   log_first: 5
 
   criterion:
@@ -59,7 +60,7 @@ trainer:
       label_smooth_rate: 0.1
 
 validator:
-  frequency: 50000
+  frequency: 500
   data:
     - data/eng-deu/dev.deu
     - data/eng-deu/dev.eng

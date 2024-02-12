@@ -89,7 +89,6 @@ namespace tahoma::train {
 
         ~Trainer() {}
 
-     
         auto save_checkpoint(string tag = "") {
             auto filename = fmt::format("model{}.pt", tag.size() > 0 ? "." + tag : "");
             auto checkpoint_file = _work_dir / filename;
@@ -102,6 +101,9 @@ namespace tahoma::train {
              if (_fp16_enabled) {  //__enter__()
                 at::autocast::set_enabled(true);
             }
+            if (mode == Mode::TRAINING){
+                _optimizer->zero_grad();
+            }
             batch.contiguous();
             batch = batch.to(_device);
             auto src_ids = batch.fields[0];  // [batch_size, seq_len]
@@ -109,10 +111,10 @@ namespace tahoma::train {
             //FIME: add bos and eos tokens to tgt_ids. Offset tgt_ids by 1
             auto _bos_col = torch::full({ tgt_ids.size(0), 1 }, _bos_id, torch::dtype(torch::kInt64).device(_device));
             auto bos_tgt_ids = torch::cat({_bos_col, tgt_ids}, 1);
-            
+
             auto src_mask = src_ids.eq(_pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
-            auto tgt_mask_padding = bos_tgt_ids.eq(_pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len] 
-            auto tgt_mask_autoreg = subsequent_mask(bos_tgt_ids.size(1), _device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len] 
+            auto tgt_mask_padding = bos_tgt_ids.eq(_pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
+            auto tgt_mask_autoreg = subsequent_mask(bos_tgt_ids.size(1), _device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len]
             auto tgt_mask = tgt_mask_padding | tgt_mask_autoreg.type_as(tgt_mask_padding); // [batch_size, 1, seq_len, seq_len]
             auto normalizer = (bos_tgt_ids != _pad_id).sum().item().toInt(); // #total - #mask
 
@@ -144,9 +146,9 @@ namespace tahoma::train {
                 at::autocast::set_enabled(false);
             }
             if (mode == Mode::TRAINING){
+                //torch::nn::utils::clip_grad_norm_(_model->parameters(), _config["trainer"]["clip_grad"].as<f32>(5.0));
                 _optimizer->step();
                 _scheduler->step();
-                _optimizer->zero_grad();
             }
             stats.update(loss.item().toDouble(), tgt_ids.size(0), normalizer, _scheduler->get_last_rate());
             return loss;
@@ -250,7 +252,7 @@ namespace tahoma::train {
         }
         return parser;
     }
-} 
+}
 
 
 int main(int argc, char* argv[]) {

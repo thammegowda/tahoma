@@ -242,9 +242,9 @@ namespace tahoma::train {
 
         auto get_rate() -> f32 {
             //  return self.constant * self.model_dim**-0.5 * min(step**-0.5, step * self.warmup**-1.5)
-            f32 rate = _options.constant 
-                * pow(_options.model_dim, -0.5) 
-                * min( pow(_current_step, -0.5), 
+            f32 rate = _options.constant
+                * pow(_options.model_dim, -0.5)
+                * min( pow(_current_step, -0.5),
                     _current_step * pow(_options.warmup_steps, -1.5)
                 );
             return rate;

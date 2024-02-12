@@ -7,7 +7,7 @@
 
 namespace tahoma::inference {
 
-    
+
     class Decoder {
     private:
         tahoma::model::TransformerNMT _model;
@@ -31,7 +31,7 @@ namespace tahoma::inference {
 
             auto src_mask = (src_ids == src_vocab->pad_id()).view({1, 1, 1, -1}); // [batch=1, 1, 1, src_len]
             src_mask = src_mask.to(torch::kBool);
-            auto memory = _model ->encoder(src_ids, src_mask);            
+            auto memory = _model ->encoder(src_ids, src_mask);
             auto tgt_ids = torch::full({src_ids.size(0), 1}, tgt_vocab->bos_id(), torch::dtype(torch::kInt64).device(_device));
             for (int i=0; i < max_len; i++){
                 auto tgt_len = tgt_ids.size(1);
@@ -42,7 +42,9 @@ namespace tahoma::inference {
                 auto next_token = output.view({1, -1}).argmax(-1);
                 tgt_ids = torch::cat({tgt_ids, next_token.view({1, -1})}, 1);
                 // TODO: max and compute score
-                // TODO: Halt on EOS
+                if (next_token.item<int64_t>() == tgt_vocab->eos_id()){
+                    break;
+                }
             }
             // convert torch Tensor into cpp vector<int64>
             tgt_ids = tgt_ids.view({-1}).to(torch::kCPU).contiguous();
