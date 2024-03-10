@@ -36,17 +36,14 @@ namespace tahoma::train {
         std::shared_ptr<model::LanguageModel> model;
         if (model_type == "transformer_nmt") {
             model = std::make_shared<model::TransformerNMTImpl>(model_args);
-            //return nn::AnyModule(model::TransformerNMT(model_args));
-            //return nn::AnyModule(std::make_shared<model::TransformerNMTImpl>(model_args));
         } else if (model_type == "transformer_lm") {
             model = std::make_shared<model::TransformerLMImpl>(model_args);
-            //return nn::AnyModule(model::TransformerLM(model_args));
-            //return nn::AnyModule(std::make_shared<model::TransformerLMImpl>(model_args));
         } else {
             throw runtime_error("Unknown model type " + model_type);
         }
-        LOG::info("Device: {}", device == torch::kCPU ? "CPU" : "CUDA");
-        model->to(device);
+        // NOTE: trying to move model to device here causes error. Not sure why. 
+        //LOG::info("Device: {}", device == torch::kCPU ? "CPU" : "CUDA");
+        //model->to(device);
         return model;
     }
 

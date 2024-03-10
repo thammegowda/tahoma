@@ -88,12 +88,10 @@ namespace tahoma::train {
         ~Trainer() {}
 
         auto save_checkpoint(string tag = "") {
-            /*
             auto filename = fmt::format("model{}.pt", tag.size() > 0 ? "." + tag : "");
             auto checkpoint_file = _work_dir / filename;
             spdlog::info("Saving checkpoint to {}", checkpoint_file);
-            torch::save(_model.get<nn::Module>(), checkpoint_file.string());
-            */
+            torch::save(_model, checkpoint_file.string());
         }
 
         auto step(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Tensor {
@@ -198,8 +196,8 @@ namespace tahoma::train {
         }
 
         void log_samples(){
-            /*
-            auto decoder = inference::Decoder(_model, _projector, _data_loader.vocabs, _device);
+            std::shared_ptr<model::TransformerNMTImpl> model = std::dynamic_pointer_cast<model::TransformerNMTImpl>(_model);
+            auto decoder = inference::Decoder(model, _projector, _data_loader.vocabs, _device);
             for (auto i=0; i < _sample_batch.size(); i++) {
                 auto ex = _sample_batch.examples[i];
                 str src = ex.fields[0];
@@ -209,7 +207,6 @@ namespace tahoma::train {
                 auto [hyp, score] = decoder.greedy_decode(src);
                 spdlog::info("[{}] HYP: ({}) {}", i, score, hyp);
             }
-            */
         }
 
         auto validate(bool show_samples=true) -> bool {

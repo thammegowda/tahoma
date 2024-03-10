@@ -9,12 +9,12 @@ namespace tahoma::inference {
 
     class Decoder {
     private:
-        tahoma::model::TransformerNMT _model;
+        std::shared_ptr<tahoma::model::TransformerNMTImpl> _model;
         nn::AnyModule _lm_head;
         vector<shared_ptr<sp::SentencePieceProcessor>> _vocabs;
         torch::Device _device;
     public:
-        Decoder(tahoma::model::TransformerNMT _model,
+        Decoder(std::shared_ptr<tahoma::model::TransformerNMTImpl> _model,
             nn::AnyModule lm_head,
             vector<shared_ptr<sp::SentencePieceProcessor>> _vocabs,
             torch::Device _device):
