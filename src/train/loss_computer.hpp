@@ -35,7 +35,7 @@ namespace tahoma::train {
             : _projector{ projector }, _criteria{ criteria }, _pad_id{ pad_id }, _chunk_size{ chunk_size }
         {}
 
-      
+
         auto compute_once(Tensor features, Tensor labels, f32 normalizer = -1.0, Mode mode = Mode::TRAINING) -> Tensor {
             auto output = _projector.forward(features);
             auto output_flat = output.view({ output.size(0) * output.size(1), -1 }); // [batch_size * seq_len, vocab_size]
@@ -45,7 +45,7 @@ namespace tahoma::train {
             }
             // get first criterion for validation
             auto& criterion = (mode == Mode::TRAINING) ? _criteria->train : _criteria->validation.begin()->second;
-            std::optional<Tensor> mask; 
+            std::optional<Tensor> mask;
             Tensor loss = criterion.forward(output_flat, labels_flat, normalizer, mask);  // [batch_size * seq_len]
             if (mode == Mode::TRAINING) {
                 loss.backward();

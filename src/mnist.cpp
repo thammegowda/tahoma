@@ -49,7 +49,7 @@ int main(int argc, char* argv[]) {
 
   argparse::ArgumentParser parser("mnist");
   parser.add_argument("data_path")
-    .help("path to the MNIST data directory");
+    .help("path to the MNIST data directory. Run data/get-mnist.sh to download data");
 
   try {
     parser.parse_args(argc, argv);
@@ -66,6 +66,8 @@ int main(int argc, char* argv[]) {
 
   // Create a new Net.
   auto net = std::make_shared<Net>();
+  auto device = torch::Device(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
+  net->to(device);
 
   // Create a multi-threaded data loader for the MNIST dataset.
   auto data_loader = torch::data::make_data_loader(
@@ -84,9 +86,9 @@ int main(int argc, char* argv[]) {
       // Reset gradients.
       optimizer.zero_grad();
       // Execute the model on the input data.
-      torch::Tensor prediction = net->forward(batch.data);
+      torch::Tensor prediction = net->forward(batch.data.to(device));
       // Compute a loss value to judge the prediction of our model.
-      torch::Tensor loss = torch::nll_loss(prediction, batch.target);
+      torch::Tensor loss = torch::nll_loss(prediction, batch.target.to(device));
       // Compute gradients of the loss w.r.t. the parameters of our model.
       loss.backward();
       // Update the parameters based on the calculated gradients.

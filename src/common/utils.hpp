@@ -7,9 +7,11 @@
 #include <algorithm>
 #include <vector>
 #include <string>
-
+#include <tahoma.hpp>
 
 namespace tahoma::utils {
+
+    using namespace tahoma;
 
     std::generator<std::string> read_lines(std::string path){
         /**

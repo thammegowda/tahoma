@@ -11,8 +11,9 @@
 
 namespace tahoma::config {
 
+
     class Config: public YAML::Node {
-    
+
     public:
         Config(const std::string& filename, bool validate = true)
         : YAML::Node {YAML::LoadFile(filename)} {
@@ -27,7 +28,7 @@ namespace tahoma::config {
         Config& operator=(Config&& other) = default;
         // destructor
         ~Config() = default;
-        
+
         static auto validate_config(const YAML::Node& config) -> void {
             std::vector<std::string> expected_keys = { "model", "schema", "optimizer", "trainer", "validator" };
             for (auto key : expected_keys) {
@@ -39,5 +40,5 @@ namespace tahoma::config {
         }
 
     };
-    
+
 } // namespace tahoma::config

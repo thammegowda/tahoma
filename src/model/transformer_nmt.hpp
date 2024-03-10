@@ -8,6 +8,7 @@
 #include <ATen/autocast_mode.h>
 #include "../common/config.hpp"
 #include "../layer/transformer.hpp"
+#include "./transformer_lm.hpp"
 
 
 namespace nn = torch::nn;
@@ -18,25 +19,25 @@ using namespace tahoma::layer;
 
 namespace tahoma::model {
 
-    struct TransformerNMTImpl : public nn::Module {
-        int src_vocab_size;
-        int tgt_vocab_size;
-        int model_dim;
+    struct TransformerNMTImpl: public LanguageModel {
+        size_t src_vocab_size;
+        size_t tgt_vocab_size;
+        size_t model_dim;
 
         TransformerEncoder encoder;
         TransformerDecoder decoder;
-        nn::Linear lm_head;
 
         TransformerNMTImpl(const YAML::Node& args):
-            src_vocab_size { args["src_vocab_size"].as<int>() },
-            tgt_vocab_size { args["tgt_vocab_size"].as<int>() },
-            model_dim { args["model_dim"].as<int>() },
+            LanguageModel(args["model_dim"].as<size_t>(), args["tgt_vocab_size"].as<size_t>()),
+            src_vocab_size { args["src_vocab_size"].as<size_t>() },
+            tgt_vocab_size { args["tgt_vocab_size"].as<size_t>() },
+            model_dim { args["model_dim"].as<size_t>() },
 
             encoder {
                 register_module("encoder", TransformerEncoder(
                 src_vocab_size,
                 model_dim,
-                args["attn_head"].as<int>(),
+                args["attn_heads"].as<int>(),
                 args["encoder_layers"].as<int>(),
                 args["dropout"].as<double>()))
             },
@@ -44,22 +45,25 @@ namespace tahoma::model {
                 register_module("decoder",  TransformerDecoder(
                 tgt_vocab_size,
                 model_dim,
-                args["attn_head"].as<int>(),
+                args["attn_heads"].as<int>(),
                 args["decoder_layers"].as<int>(),
                 args["dropout"].as<double>()))
-            },
-            lm_head { register_module("lm_head", nn::Linear(nn::LinearOptions(model_dim, tgt_vocab_size))) }
+            }
         {}
 
-        auto forward(torch::Tensor& src, torch::Tensor& src_mask,
-                    torch::Tensor& tgt, torch::Tensor& tgt_mask) -> torch::Tensor {
-            // src: [batch_size, src_len]
-            // tgt: [batch_size, tgt_len]
-            // return: [batch_size, tgt_len, tgt_vocab_size]
+        auto task_type() -> TaskType override {
+            return TaskType::NMT;
+        }
+
+        virtual auto forward(Pack& args) -> Pack override {
+            auto src = std::any_cast<Tensor>(args["src"]); // [batch_size, src_len]
+            auto tgt = std::any_cast<Tensor>(args["tgt"]); // [batch_size, tgt_len]
+            auto src_mask = std::any_cast<Tensor>(args["src_mask"]); // [batch_size, src_len]
+            auto tgt_mask = std::any_cast<Tensor>(args["tgt_mask"]); // [batch_size, tgt_len]
             auto memory = encoder(src, src_mask); // [batch_size, src_len, model_dim]
             auto output = decoder(memory, src_mask, tgt, tgt_mask); // [batch_size, tgt_len, model_dim]
             //output = lm_head(output); // [batch_size, tgt_len, tgt_vocab_size]
-            return output;
+            return { {"result", output} };
         }
     };
     TORCH_MODULE(TransformerNMT);

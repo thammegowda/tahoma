@@ -6,7 +6,7 @@ model:
     encoder_layers: 6
     decoder_layers: 6
     model_dim: 512
-    attn_head: 8
+    attn_heads: 8
     ffn_dim: 2048
     dropout: 0.1
 

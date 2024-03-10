@@ -6,7 +6,6 @@
 #include <memory>
 #include <chrono>
 #include <__generator.hpp>  //reference implementation of generator
-#include <argparse.hpp>
 
 #include <ATen/autocast_mode.h>
 #include <torch/torch.h>
@@ -16,6 +15,7 @@
 #include "../common/config.hpp"
 #include "../common/data.hpp"
 #include "../model/transformer_nmt.hpp"
+#include "../model/transformer_lm.hpp"
 #include "./utils.hpp"
 #include "./stats_counter.hpp"
 #include "../inference/decoder.hpp"
@@ -32,12 +32,15 @@ using namespace chrono;
 
 namespace tahoma::train {
 
-    template <typename M>
+    auto DEVICE = torch::Device(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
+
+    //template <typename M = model::LanguageModel>
     class Trainer {
     protected:
         fs::path _work_dir;
         config::Config _config;
-        M _model;
+        std::shared_ptr<model::LanguageModel> _model;
+        //nn::AnyModule _model;
         nn::AnyModule _projector;
         shared_ptr<optim::Optimizer> _optimizer;
         shared_ptr<train::LRScheduler> _scheduler;
@@ -47,7 +50,7 @@ namespace tahoma::train {
         int64_t _pad_id = 0;
         int64_t _bos_id = 1;
         shared_ptr<LossComputer> _loss_computer;
-        torch::Device _device{ torch::cuda::is_available() ? "cuda" : "cpu" };
+        torch::Device _device;
         data::Batch _sample_batch;
         Stopper _stopper;
 
@@ -55,10 +58,12 @@ namespace tahoma::train {
         Trainer(fs::path work_dir, config::Config conf)
             : _work_dir{ work_dir },
             _config{ conf },
-            _model{ init_model<M>(_config, _device) },
+            _device{ DEVICE },
+            _model{ init_model(_config, _device)},
             _projector{ _model->lm_head },
             _optimizer{ init_optimizer(_config, _model) },
             _scheduler{ init_scheduler(_config, *_optimizer) },
+
             _data_loader{ tahoma::data::DataLoader(_config) },
             _fp16_enabled{ _config["trainer"]["fp16"].as<bool>(false) },
             _pad_id {_data_loader.vocabs[1]->pad_id()},   //vocabs[1] is the target vocab
@@ -67,15 +72,8 @@ namespace tahoma::train {
             _sample_batch{ _data_loader.get_samples(_config["validator"]["data"].as<vector<string>>(), /*n_samples*/5) },
             _stopper{ _config["trainer"]["early_stopping"].as<int>(8) }
         {
-            spdlog::info("Trainer initialized; work_dir={} device={}; fp16={}",
-                work_dir, _device == torch::kCUDA ? "cuda" : "cpu", _fp16_enabled);
-            if (torch::cuda::is_available()) {
-                vector<string> device_ids;
-                for (auto i=0; i < torch::cuda::device_count(); i++){
-                    device_ids.push_back(fmt::format("{}", i));
-                }
-                spdlog::info("CUDA devices: {}", fmt::join(device_ids, ", "));
-            }
+            spdlog::info("Trainer initialized; work_dir={}, cuda_available?={} device={}; fp16={}",
+                work_dir, torch::cuda::is_available(), _device == torch::kCUDA ? "cuda" : "cpu", _fp16_enabled);
             spdlog::info("Early stopping enabled? {}, patience: {}",  _stopper.patience > 0 ? "Yes" : "No",  _stopper.patience);
             // check if pad_id is correct
             if (_pad_id < 0){
@@ -90,10 +88,12 @@ namespace tahoma::train {
         ~Trainer() {}
 
         auto save_checkpoint(string tag = "") {
+            /*
             auto filename = fmt::format("model{}.pt", tag.size() > 0 ? "." + tag : "");
             auto checkpoint_file = _work_dir / filename;
             spdlog::info("Saving checkpoint to {}", checkpoint_file);
-            torch::save(_model, checkpoint_file.string());
+            torch::save(_model.get<nn::Module>(), checkpoint_file.string());
+            */
         }
 
         auto step(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Tensor {
@@ -136,7 +136,15 @@ namespace tahoma::train {
                 std::cout << "normalizer: " << normalizer << std::endl;
             }
 
-            auto features = _model(src_ids, src_mask, bos_tgt_ids, tgt_mask);
+            //auto features = _model->forward(src_ids, src_mask, bos_tgt_ids, tgt_mask);
+            Pack pack = {
+                {"src", src_ids},
+                {"src_mask", src_mask},
+                {"tgt", bos_tgt_ids},
+                {"tgt_mask", tgt_mask}
+            };
+            auto result = _model->forward(pack);
+            auto features = std::any_cast<Tensor>(result["result"]); // [batch_size, seq_len, model_dim]
             // skip the last token (EOS) in features, as it is not used in loss computation
             features = features.index({ Slice(), Slice(0, -1), Slice() }); // [batch_size, seq_len, model_dim]
             auto loss = _loss_computer->compute(features, tgt_ids, normalizer, mode);
@@ -153,6 +161,7 @@ namespace tahoma::train {
             stats.update(loss.item().toDouble(), tgt_ids.size(0), normalizer, _scheduler->get_last_rate());
             return loss;
         }
+
 
         void train() {
             LOG::info("Moving to device {}", _device == torch::kCUDA ? "cuda" : "cpu");
@@ -176,6 +185,7 @@ namespace tahoma::train {
                         bool is_early_stop = validate();
                         if (is_early_stop) {
                             LOG::info("Early stopping at epoch {} step {}", epoch, stats.step_num);
+                            // todo: throw an EarlyStopException
                             return;
                         }
                         _model->train();
@@ -188,6 +198,7 @@ namespace tahoma::train {
         }
 
         void log_samples(){
+            /*
             auto decoder = inference::Decoder(_model, _projector, _data_loader.vocabs, _device);
             for (auto i=0; i < _sample_batch.size(); i++) {
                 auto ex = _sample_batch.examples[i];
@@ -198,6 +209,7 @@ namespace tahoma::train {
                 auto [hyp, score] = decoder.greedy_decode(src);
                 spdlog::info("[{}] HYP: ({}) {}", i, score, hyp);
             }
+            */
         }
 
         auto validate(bool show_samples=true) -> bool {
@@ -235,42 +247,6 @@ namespace tahoma::train {
         }
     };
 
-    auto parse_args(int argc, char* argv[]) -> argparse::ArgumentParser {
-        argparse::ArgumentParser parser("trainer");
-        parser.add_argument("-v", "--verbose").help("Increase log verbosity")
-            .default_value(false).implicit_value(true);
-        parser.add_argument("work_dir").help("Working directory").required();
-        parser.add_argument("-c", "--config").help("Config file. Optional: default is config.toml in work_dir");
-
-        try {
-            parser.parse_args(argc, argv);
-        }
-        catch (const std::runtime_error& err) {
-            std::cerr << err.what() << std::endl;
-            std::cerr << parser;
-            exit(1);
-        }
-        return parser;
-    }
-}
-
-
-int main(int argc, char* argv[]) {
-    spdlog::info("main started.. torch version: {} ", TORCH_VERSION);
-    auto args = train::parse_args(argc, argv);
-    if (args.get<bool>("verbose")) {
-        spdlog::set_level(spdlog::level::debug);
-    }
-    auto work_dir = fs::path{ args.get<std::string>("work_dir") };
-    auto config_file_arg = args.get<std::string>("config");
-    fs::path config_file;
-    if (!config_file_arg.empty()) {
-        config_file = fs::path{ config_file_arg };
-    }
-    auto trainer = train::Trainer<model::TransformerNMT>(work_dir, config_file);
-    trainer.train();
-    spdlog::info("main finished..");
-    return 0;
 }
 
 

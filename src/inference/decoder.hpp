@@ -7,7 +7,6 @@
 
 namespace tahoma::inference {
 
-
     class Decoder {
     private:
         tahoma::model::TransformerNMT _model;
@@ -15,7 +14,10 @@ namespace tahoma::inference {
         vector<shared_ptr<sp::SentencePieceProcessor>> _vocabs;
         torch::Device _device;
     public:
-        Decoder(tahoma::model::TransformerNMT _model, nn::AnyModule lm_head, vector<shared_ptr<sp::SentencePieceProcessor>> _vocabs, torch::Device _device):
+        Decoder(tahoma::model::TransformerNMT _model,
+            nn::AnyModule lm_head,
+            vector<shared_ptr<sp::SentencePieceProcessor>> _vocabs,
+            torch::Device _device):
             _model {_model}, _lm_head {lm_head}, _vocabs{_vocabs}, _device{_device}
         {
             if (_vocabs.size() != 2){

@@ -6,6 +6,8 @@
 #include <memory>
 #include <cassert>
 #include <signal.h>
+#include <any>
+#include <map>
 #include <spdlog/spdlog.h>
 #include <spdlog/fmt/bundled/format.h>
 #include <torch/torch.h>
@@ -35,7 +37,7 @@ struct fmt::formatter<fs::path> {
 
 
 namespace tahoma {
-    
+
     namespace LOG = spdlog;
     using namespace std;
 
@@ -55,6 +57,7 @@ namespace tahoma {
     namespace torch = torch; // noop, but just incase you forgot
     namespace nn = torch::nn;
     using Tensor = torch::Tensor;
+    using Pack = std::map<std::string, std::any>;
     //auto k_device = torch::device(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
 
     //template<typename T>
@@ -70,12 +73,16 @@ namespace tahoma {
         return 0;
     }
 
-
     enum Mode {
         TRAINING,
         INFERENCE,
     };
-    
+
+
+    enum TaskType {
+        LM,
+        NMT,
+    };
 
 } // namespace tahoma
 

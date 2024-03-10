@@ -247,7 +247,7 @@ namespace tahoma::layer {
         {
         }
 
-        auto forward(torch::Tensor& memory, torch::Tensor& memory_mask, 
+        auto forward(torch::Tensor& memory, torch::Tensor& memory_mask,
                     torch::Tensor& tgt, torch::Tensor& tgt_mask) -> torch::Tensor {
             // tgt: [batch_size, tgt_len, model_dim]
             // memory: [batch_size, src_len, model_dim]
@@ -287,7 +287,7 @@ namespace tahoma::layer {
             model_dim {( assert(model_dim > 0),  model_dim )},
             num_layers {( assert(num_layers > 0), num_layers )},
             nhead {( assert(nhead >0), assert(model_dim % nhead == 0),  nhead )},
-            position_embedding{( 
+            position_embedding{(
                 assert(vocab_size > 0), assert(model_dim > 0),
                 register_module("position_embedding", AbsolutePositionEmbedding(vocab_size, model_dim, dropout)) 
                 )},

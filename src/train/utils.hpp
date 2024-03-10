@@ -13,6 +13,8 @@
 #include "../common/data.hpp"
 #include "./loss_computer.hpp"
 #include "./criterion.hpp"
+#include "../model/transformer_nmt.hpp"
+#include "../model/transformer_lm.hpp"
 
 
 
@@ -27,17 +29,25 @@ using namespace tahoma;
 
 namespace tahoma::train {
 
-    template <typename M>
-    auto init_model(config::Config& config, torch::Device& device) -> M {
+
+    auto init_model(config::Config& config, torch::Device& device) -> std::shared_ptr<model::LanguageModel> {
         auto model_type = config["model"]["name"].as<string>();
+        YAML::Node model_args = config["model"]["args"];
+        std::shared_ptr<model::LanguageModel> model;
         if (model_type == "transformer_nmt") {
-            YAML::Node model_args = config["model"]["args"];
-            auto model = model::TransformerNMT(model_args);
-            return model;
-        }
-        else {
+            model = std::make_shared<model::TransformerNMTImpl>(model_args);
+            //return nn::AnyModule(model::TransformerNMT(model_args));
+            //return nn::AnyModule(std::make_shared<model::TransformerNMTImpl>(model_args));
+        } else if (model_type == "transformer_lm") {
+            model = std::make_shared<model::TransformerLMImpl>(model_args);
+            //return nn::AnyModule(model::TransformerLM(model_args));
+            //return nn::AnyModule(std::make_shared<model::TransformerLMImpl>(model_args));
+        } else {
             throw runtime_error("Unknown model type " + model_type);
         }
+        LOG::info("Device: {}", device == torch::kCPU ? "CPU" : "CUDA");
+        model->to(device);
+        return model;
     }
 
     auto init_criterion(const YAML::Node& config, i64 ignore_idx) -> nn::AnyModule {
@@ -57,11 +67,10 @@ namespace tahoma::train {
         } else {
             throw runtime_error("Unknown criterion " + name +". only cross_entropy supported");
         }
-        
     }
 
-    template <typename M>
-    auto init_optimizer(const config::Config& config, M model)
+    //template <typename M>
+    auto init_optimizer(const config::Config& config, /*nn::AnyModule*/ std::shared_ptr<model::LanguageModel> model)
         -> std::shared_ptr<optim::Optimizer> {
         auto optim_config = config["optimizer"];
         auto optim_name = optim_config["name"].as<string>();
