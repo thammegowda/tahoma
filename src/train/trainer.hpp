@@ -117,23 +117,26 @@ namespace tahoma::train {
             auto normalizer = (bos_tgt_ids != _pad_id).sum().item().toInt(); // #total - #mask
 
             bool debug_input = false;
-            if (debug_input) {
+            
+            auto log_batch = [&](){
                 // print batch for debugging
                 for (auto i=0; i <batch.examples.size(); i++){
                     auto ex = batch.examples[i];
                     str src = ex.fields[0];
                     str ref = ex.fields[1];
-                    std::cout << "SRC: " << src << std::endl;
-                    std::cout << "REF: " << ref << std::endl;
+                    std::cerr << "SRC: " << src << std::endl;
+                    std::cerr << "REF: " << ref << std::endl;
                 }
-                std::cout << "src_ids: " << src_ids << std::endl;
-                std::cout << "bos_tgt_ids: " << bos_tgt_ids << std::endl;
-                std::cout << "pad_id: " << _pad_id << std::endl;
-                std::cout << "src_mask: " << src_mask << std::endl;
-                std::cout << "tgt_mask: " << tgt_mask << std::endl;
-                std::cout << "normalizer: " << normalizer << std::endl;
+                std::cerr << "src_ids: " << src_ids << std::endl;
+                std::cerr << "bos_tgt_ids: " << bos_tgt_ids << std::endl;
+                std::cerr << "pad_id: " << _pad_id << std::endl;
+                std::cerr << "src_mask: " << src_mask << std::endl;
+                std::cerr << "tgt_mask: " << tgt_mask << std::endl;
+                std::cerr << "normalizer: " << normalizer << std::endl;
+            };
+            if (debug_input) {
+                log_batch();   
             }
-
             //auto features = _model->forward(src_ids, src_mask, bos_tgt_ids, tgt_mask);
             Pack pack = {
                 {"src", src_ids},
@@ -145,19 +148,23 @@ namespace tahoma::train {
             auto features = std::any_cast<Tensor>(result["result"]); // [batch_size, seq_len, model_dim]
             // skip the last token (EOS) in features, as it is not used in loss computation
             features = features.index({ Slice(), Slice(0, -1), Slice() }); // [batch_size, seq_len, model_dim]
-            auto loss = _loss_computer->compute(features, tgt_ids, normalizer, mode);
-
-            if (_fp16_enabled) {  // __exit__()
-                at::autocast::clear_cache();
-                at::autocast::set_enabled(false);
+            try {
+                auto loss = _loss_computer->compute(features, tgt_ids, normalizer, mode);
+                stats.update(loss.item().toDouble(), tgt_ids.size(0), normalizer, _scheduler->get_last_rate());
+                if (_fp16_enabled) {  // __exit__()
+                    at::autocast::clear_cache();
+                    at::autocast::set_enabled(false);
+                }
+                if (mode == Mode::TRAINING){
+                    torch::nn::utils::clip_grad_norm_(_model->parameters(), _config["trainer"]["clip_grad"].as<f32>(5.0));
+                    _optimizer->step();
+                    _scheduler->step();
+                }
+                return loss;
+            } catch (const BadBatchException& e) {
+                log_batch();
+                throw;
             }
-            if (mode == Mode::TRAINING){
-                //torch::nn::utils::clip_grad_norm_(_model->parameters(), _config["trainer"]["clip_grad"].as<f32>(5.0));
-                _optimizer->step();
-                _scheduler->step();
-            }
-            stats.update(loss.item().toDouble(), tgt_ids.size(0), normalizer, _scheduler->get_last_rate());
-            return loss;
         }
 
 
@@ -174,9 +181,22 @@ namespace tahoma::train {
             Stopper stopper(_config["trainer"]["early_stopping"].as<int>(8));
             int16_t log_first = _config["trainer"]["log_first"].as<int16_t>(0);
             auto stats = StatsCounter(log_frequency, /*name=*/"Training", /*log_first=*/log_first);
+            size_t n_skips = 0;
+            size_t MAX_BAD_SKIPS = 5;
             for (i32 epoch = 0; epoch < num_epochs; epoch++) {
                 for (auto batch : _data_loader.get_train_data()) {
-                    step(batch, stats, Mode::TRAINING);
+                    try {
+                        step(batch, stats, Mode::TRAINING);
+                        n_skips = 0;
+                    } catch (const BadBatchException& e) {
+                        LOG::error("Bad batch detected. Skipping batch. Error: {}", e.what());
+                        n_skips++;
+                        if (n_skips > MAX_BAD_SKIPS) {
+                            LOG::error("Too many bad batches. Aborting training training");
+                            return;
+                        }
+                        continue;
+                    }
                     batch.fields.clear(); // clear references to tensors
 
                     if (stats.step_num % validation_frequency == 0) {

@@ -21,6 +21,11 @@ namespace tahoma::train {
         std::map<std::string, nn::AnyModule> validation; // multiple criteria for validation, with names
     };
 
+    class BadBatchException : public std::runtime_error {
+        public:
+            BadBatchException(const std::string& message) : std::runtime_error(message) {}
+    };
+
 
     class LossComputer {
 
@@ -48,7 +53,11 @@ namespace tahoma::train {
             std::optional<Tensor> mask;
             Tensor loss = criterion.forward(output_flat, labels_flat, normalizer, mask);  // [batch_size * seq_len]
             if (mode == Mode::TRAINING) {
-                loss.backward();
+                if (torch::isfinite(loss).item().toBool()){
+                    loss.backward();
+                } else {
+                    throw BadBatchException("Loss is not finite");
+                }
             }
             return loss;
         }
@@ -77,6 +86,9 @@ namespace tahoma::train {
                 auto chunk_features = features_isolated.index({ Slice(), Slice(start, end), Slice() });
                 auto chunk_labels = labels.index({ Slice(), Slice(start, end) });
                 auto chunk_loss = compute_once(chunk_features, chunk_labels, normalizer, mode);
+                if (mode == Mode::TRAINING && !torch::isfinite(chunk_loss).item().toBool()){
+                    throw BadBatchException("Loss is not finite");
+                }
                 total_loss += chunk_loss.item().toFloat();
             }
 

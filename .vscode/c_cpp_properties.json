@@ -13,8 +13,7 @@
             "intelliSenseMode": "linux-gcc-x64",
             "configurationProvider": "ms-vscode.cmake-tools",
             "cppStandard": "c++23",
-            "cStandard": "c23",
-            "compilerPath": "/usr/bin/g++-12"
+            "cStandard": "c23"
         }
     ],
     "version": 4
