@@ -39,7 +39,7 @@ namespace tahoma::inference {
             for (int i=0; i < max_len; i++){
                 auto tgt_len = tgt_ids.size(1);
                 auto tgt_mask = tahoma::train::subsequent_mask(tgt_len, _device).to(torch::kBool).view({1, 1, tgt_len, tgt_len});  // [batch=1, head=1, tgt_len, tgt_len]
-                auto features = _model->decoder(memory, src_mask, tgt_ids, tgt_mask);
+                auto features = _model->decoder(tgt_ids, tgt_mask, memory, src_mask);
                 features = features.index({Slice(), -1, Slice()});
                 auto output = _lm_head.forward(features);
                 //auto next_token = output.view({1, -1}).argmax(-1);

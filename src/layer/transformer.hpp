@@ -44,7 +44,7 @@ namespace tahoma::layer {
             register_buffer("positions", positions);  //required for this->to(device) to work
         }
 
-        auto forward(torch::Tensor& x) -> torch::Tensor {
+        auto forward(torch::Tensor x) -> torch::Tensor {
             x = embedding(x);   // [batch_size, seq_len] -> [batch_size, seq_len, model_dim]
             x = x * std::sqrt(model_dim);
             // x = x + pe[:, :x.size(1)]
@@ -56,6 +56,25 @@ namespace tahoma::layer {
     };
     TORCH_MODULE(AbsolutePositionEmbedding);
 
+    struct FFSubLayerImpl : public nn::Module {
+        nn::Linear fc1;
+        nn::Linear fc2;
+        nn::Dropout dropout;
+
+        FFSubLayerImpl(int model_dim, int ff_dim, double dropout = 0.1) :
+            fc1{ register_module("fc1", nn::Linear(nn::LinearOptions(model_dim, ff_dim))) },
+            fc2{ register_module("fc2", nn::Linear(nn::LinearOptions(ff_dim, model_dim))) },
+            dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) }
+        {
+        }
+
+        auto forward(torch::Tensor x) -> torch::Tensor {
+            x = F::gelu(fc1(x));
+            x = dropout(fc2(x));
+            return x;
+        }
+    };
+    TORCH_MODULE(FFSubLayer);
 
     struct MultiheadAttentionImpl: public nn::Module {
         nn::Linear q_proj;
@@ -77,8 +96,8 @@ namespace tahoma::layer {
             nhead{ nhead }
         {}
 
-        auto forward(torch::Tensor& query, torch::Tensor& key, torch::Tensor& value, torch::Tensor& key_padding_mask) 
-            -> std::tuple<torch::Tensor, torch::Tensor> {
+        auto forward(torch::Tensor query, torch::Tensor key, torch::Tensor value, torch::Tensor key_padding_mask) 
+            -> std::pair<torch::Tensor, torch::Tensor> {
             // query:   [batch_size, tgt_len, model_dim]
             // key, val: [batch_size, src_len, model_dim]
             // key_padding_mask: [batch_size, 1, T, src_len]
@@ -92,13 +111,14 @@ namespace tahoma::layer {
             assert(query.size(2) == model_dim);
             assert(key.size(2) == model_dim);
             assert(value.size(2) == model_dim);
+            auto head_dim = model_dim / nhead;
 
-            auto q = q_proj(query).view({ batch_size, tgt_len, nhead, model_dim / nhead }).transpose(1, 2); // [batch_size, nhead, tgt_len, model_dim / nhead]
-            auto k = k_proj(key).view({ batch_size, src_len, nhead, model_dim / nhead }).transpose(1, 2); // [batch_size, nhead, src_len, model_dim / nhead]
-            auto v = v_proj(value).view({ batch_size, src_len, nhead, model_dim / nhead }).transpose(1, 2); // [batch_size, nhead, src_len, model_dim / nhead]
+            auto q = q_proj(query).view({ batch_size, tgt_len, nhead, head_dim }).transpose(1, 2); // [batch_size, nhead, tgt_len, head_dim]
+            auto k = k_proj(key).view({ batch_size, src_len, nhead, head_dim }).transpose(1, 2); // [batch_size, nhead, src_len, head_dim]
+            auto v = v_proj(value).view({ batch_size, src_len, nhead, head_dim }).transpose(1, 2); // [batch_size, nhead, src_len, head_dim]
 
             auto attn_weights = torch::matmul(q, k.transpose(-2, -1)); // [batch_size, nhead, tgt_len, src_len]
-            attn_weights = attn_weights / std::sqrt(model_dim / nhead);
+            attn_weights = attn_weights / std::sqrt(head_dim);
 
             if (key_padding_mask.defined()) {
                 // insert head dim
@@ -116,53 +136,54 @@ namespace tahoma::layer {
             }
             attn_weights = F::softmax(attn_weights, -1); // [batch_size, nhead, tgt_len, src_len]
             attn_weights = dropout(attn_weights);
-            //std::cout << "attn_weights" << attn_weights.sizes() << "\t v" << v.sizes() << std::endl;
-            auto attn_output = torch::matmul(attn_weights, v) // [batch_size, nhead, tgt_len, model_dim / nhead]
-                                .transpose(1, 2)              // [batch_size, tgt_len, nhead, model_dim / nhead]
+            auto attn_output = torch::matmul(attn_weights, v) // [batch_size, nhead, tgt_len, head_dim]
+                                .transpose(1, 2)              // [batch_size, tgt_len, nhead, head_dim]
                                 .contiguous().view({ batch_size, tgt_len, model_dim }); // [batch_size, tgt_len, model_dim]
 
             attn_output = out_proj(attn_output); // [batch_size, tgt_len, model_dim]
-            return std::make_tuple(attn_output, attn_weights);
+
+            return std::make_pair(attn_output, attn_weights);
         }
     };
     TORCH_MODULE(MultiheadAttention);
     
 
     struct TransformerEncoderLayerImpl : public nn::Module {
-        MultiheadAttention self_attn;
-        nn::Linear fc1;
-        nn::Linear fc2;
         nn::LayerNorm norm1;
-        nn::LayerNorm norm2;
+        MultiheadAttention self_attn;
         nn::Dropout dropout1;
+
+        nn::LayerNorm norm2;
+        FFSubLayer ffn;
         nn::Dropout dropout2;
 
-        TransformerEncoderLayerImpl(int model_dim, int nhead, double dropout = 0.1) :
-            self_attn{
-                (assert(model_dim > 0), assert(nhead > 0), assert(model_dim % nhead == 0),
-                register_module("self_attn", MultiheadAttention(model_dim, nhead, dropout)))
-                },
-            fc1{ register_module("fc1", nn::Linear(nn::LinearOptions(model_dim, model_dim * 4))) },
-            fc2{ register_module("fc2", nn::Linear(nn::LinearOptions(model_dim * 4, model_dim))) },
-            norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
-            norm2{ register_module("norm2", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+        TransformerEncoderLayerImpl(int model_dim, int ffn_dim, int nhead, double dropout = 0.1) :
+            norm1{ ( // using comma operator to assert multiple conditions before first initialization
+                assert(model_dim > 0),
+                assert(nhead > 0),
+                assert(model_dim % nhead == 0),
+                assert(ffn_dim > 0),
+                register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }) )))},
+            self_attn{register_module("self_attn", MultiheadAttention(model_dim, nhead, dropout))},
             dropout1{ register_module("dropout1", nn::Dropout(nn::DropoutOptions(dropout))) },
+            
+            norm2{ register_module("norm2", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            ffn{ register_module("ffn", FFSubLayer(model_dim, ffn_dim, dropout)) },
             dropout2{ register_module("dropout2", nn::Dropout(nn::DropoutOptions(dropout))) }
-        {
-        }
+        {}
 
-        auto forward(torch::Tensor& src, torch::Tensor& src_mask) -> torch::Tensor {
+        auto forward(torch::Tensor src, torch::Tensor src_mask) -> torch::Tensor {
             // src: [batch_size, src_len, model_dim]
             // src_mask: [batch_size, 1, src_len]
             // return: [batch_size, src_len, model_dim]
 
-            auto src2 = std::get<0>(self_attn(src, src, src, src_mask)); // [batch_size, src_len, model_dim]
-            src = src + dropout1(src2);
-            src = norm1(src);
+            auto x = norm1(src);
+            x = self_attn(x, x, x, src_mask).first; // [batch_size, src_len, model_dim]
+            src = src + dropout1(x);
 
-            src2 = fc2(F::gelu(fc1(src))); // [batch_size, src_len, model_dim]
-            src = src + dropout2(src2);
-            src = norm2(src);
+            x = norm2(src);
+            x = ffn(x);
+            src = src + dropout2(x);
             return src;
         }
     };
@@ -170,44 +191,36 @@ namespace tahoma::layer {
 
 
     struct TransformerEncoderImpl : public nn::Module {
-        AbsolutePositionEmbedding position_embedding = nullptr;
-        nn::LayerNorm norm1;
-        nn::Dropout dropout;
+        AbsolutePositionEmbedding position_embedding;
+        nn::LayerNorm norm;
         int num_layers;
         nn::ModuleList layers;
 
-        static nn::ModuleList make_layers(int model_dim, int nhead, int num_layers, double dropout = 0.1) {
-            auto layers = nn::ModuleList(); 
-            for (int i = 0; i < num_layers; ++i) {
-                layers->push_back(TransformerEncoderLayer(model_dim, nhead, dropout));
+        TransformerEncoderImpl(int vocab_size, int model_dim, int ffn_dim, int nhead, int num_layers, double dropout = 0.1) :
+            //embedding{ register_module("embedding", nn::Embedding(nn::EmbeddingOptions(vocab_size, model_dim))) },
+            num_layers{ num_layers },
+            position_embedding{ register_module("position_embedding", AbsolutePositionEmbedding(vocab_size, model_dim, dropout)) },
+            layers{ register_module("layers", nn::ModuleList())},
+            norm{ register_module("norm", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) }
+        {
+             for (int i = 0; i < num_layers; i++) {
+                layers->push_back(TransformerEncoderLayer(model_dim, ffn_dim, nhead, dropout));
             }
-            return layers;
         }
 
-        TransformerEncoderImpl(int vocab_size, int model_dim, int nhead, int num_layers, double dropout = 0.1) :
-            //embedding{ register_module("embedding", nn::Embedding(nn::EmbeddingOptions(vocab_size, model_dim))) },
-            position_embedding{ register_module("position_embedding", AbsolutePositionEmbedding(vocab_size, model_dim, dropout)) },
-            norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
-            dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
-            layers{ register_module("layers", make_layers(model_dim, nhead, num_layers, dropout))},
-            num_layers{ num_layers }
-        {
-        }
-        auto forward(torch::Tensor& src, torch::Tensor& src_mask) -> torch::Tensor {
+        auto forward(torch::Tensor src, torch::Tensor src_mask) -> torch::Tensor {
             // src: [batch_size, src_len]
             // src_mask: [batch_size, 1, src_len]
             // return: [batch_size, src_len, model_dim]
 
-            auto x = src;
-            //auto src_embedded = embedding(src); // [batch_size, src_len, model_dim]
-            x = position_embedding(x); // [batch_size, src_len, model_dim]
-            x = dropout(x);
-            x = norm1(x);
+            auto x = position_embedding(src); // [batch_size, src_len, model_dim]
+            // x = dropout(x);  dropout already applied by position_embedding
 
             for (int i = 0; i < num_layers; ++i) {
                 auto layer = layers->at<TransformerEncoderLayerImpl>(i);
                 x = layer.forward(x, src_mask);
             }
+            x = norm(x);
             return x;
         }
     };
@@ -216,59 +229,61 @@ namespace tahoma::layer {
 
     struct TransformerDecoderLayerImpl : public nn::Module {
 
-        MultiheadAttention self_attn;
-        MultiheadAttention src_attn;
-        nn::Linear fc1;
-        nn::Linear fc2;
-
+        
         nn::LayerNorm norm1;
-        nn::LayerNorm norm2;
-        nn::LayerNorm norm3;
-
+        MultiheadAttention self_attn;
         nn::Dropout dropout1;
+        
+        nn::LayerNorm norm2;
+        MultiheadAttention src_attn;
         nn::Dropout dropout2;
+        
+        nn::LayerNorm norm3;
+        FFSubLayer ffn;
         nn::Dropout dropout3;
 
-        TransformerDecoderLayerImpl(int model_dim, int nhead, double dropout = 0.1) :
-            self_attn {( 
+        TransformerDecoderLayerImpl(int model_dim, int ffn_dim, int nhead, double dropout = 0.1) :
+            norm1 { ( // using comma operator to assert multiple conditions before first initialization
                 assert(model_dim > 0), 
                 assert(nhead > 0),
                 assert(model_dim % nhead == 0), 
-                register_module("self_attn", MultiheadAttention(model_dim, nhead, dropout)) )},
-            src_attn { register_module("src_attn", MultiheadAttention(model_dim, nhead, dropout)) },
-            fc1 { register_module("fc1", nn::Linear(nn::LinearOptions(model_dim, model_dim * 4))) },
-            fc2 { register_module("fc2", nn::Linear(nn::LinearOptions(model_dim * 4, model_dim))) },
-            norm1 { register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
-            norm2 { register_module("norm2", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
-            norm3 { register_module("norm3", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+                assert(ffn_dim > 0),
+                register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim })))) },
+            self_attn {register_module("self_attn", MultiheadAttention(model_dim, nhead, dropout))},
             dropout1 { register_module("dropout1", nn::Dropout(nn::DropoutOptions(dropout))) },
+            
+            norm2 { register_module("norm2", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            src_attn { register_module("src_attn", MultiheadAttention(model_dim, nhead, dropout)) },
             dropout2 { register_module("dropout2", nn::Dropout(nn::DropoutOptions(dropout))) },
+           
+            norm3 { register_module("norm3", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
+            ffn { register_module("ffn", FFSubLayer(model_dim, ffn_dim, dropout)) },
             dropout3 { register_module("dropout3", nn::Dropout(nn::DropoutOptions(dropout))) }
         {
         }
 
-        auto forward(torch::Tensor& memory, torch::Tensor& memory_mask,
-                    torch::Tensor& tgt, torch::Tensor& tgt_mask) -> torch::Tensor {
+        auto forward(torch::Tensor tgt, torch::Tensor tgt_mask, torch::Tensor memory, torch::Tensor memory_mask) -> torch::Tensor {
             // tgt: [batch_size, tgt_len, model_dim]
             // memory: [batch_size, src_len, model_dim]
             // tgt_mask: [batch_size, 1, tgt_len]
             // memory_mask: [batch_size, 1, src_len]
-            // return
+            // return: [batch_size, tgt_len, model_dim]
 
-            // query, key, value, key_value_mask
-            auto x = tgt;
-            auto x2 = std::get<0>(self_attn(x, x, x, tgt_mask)); // [batch_size, tgt_len, model_dim]
-            x = x + dropout1(x2);
-            x = norm1(x);
+            // Self attention sublayer
+            torch::Tensor x = norm1(tgt);
+            x = self_attn(x, x, x, tgt_mask).first; // [batch_size, tgt_len, model_dim]
+            tgt = tgt + dropout1(x);
+    
+            // Source attention sublayer
+            x = norm2(tgt);
+            x = src_attn(x, memory, memory, memory_mask).first; // [batch_size, tgt_len, model_dim]
+            tgt = tgt + dropout2(x);
 
-            x2 = std::get<0>(src_attn(x, memory, memory, memory_mask)); // [batch_size, tgt_len, model_dim]
-            x = x + dropout2(x2);
-            x = norm2(x);
-
-            x2 = fc2(F::gelu(fc1(x))); // [batch_size, tgt_len, model_dim]
-            x = x + dropout3(x2);
-            x = norm3(x);
-            return x;
+            // Feed forward sublayer
+            x = norm3(tgt);
+            x = ffn(x);
+            tgt = tgt + dropout3(x);
+            return tgt;
         }
     };
     TORCH_MODULE(TransformerDecoderLayer);
@@ -279,11 +294,10 @@ namespace tahoma::layer {
         int nhead;
 
         AbsolutePositionEmbedding position_embedding;
-        nn::LayerNorm norm1;
-        nn::Dropout dropout;
+        nn::LayerNorm norm;
         nn::ModuleList layers;
 
-        TransformerDecoderImpl(int vocab_size, int model_dim, int nhead, int num_layers, double dropout = 0.1) :
+        TransformerDecoderImpl(int vocab_size, int model_dim, int ffn_dim, int nhead, int num_layers, double dropout = 0.1) :
             model_dim {( assert(model_dim > 0),  model_dim )},
             num_layers {( assert(num_layers > 0), num_layers )},
             nhead {( assert(nhead >0), assert(model_dim % nhead == 0),  nhead )},
@@ -291,32 +305,29 @@ namespace tahoma::layer {
                 assert(vocab_size > 0), assert(model_dim > 0),
                 register_module("position_embedding", AbsolutePositionEmbedding(vocab_size, model_dim, dropout)) 
                 )},
-            norm1{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
-            dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
+            norm{ register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
             layers{ register_module("layers", nn::ModuleList()) }
         {
             for (int i = 0; i < num_layers; ++i) {
-                layers->push_back(TransformerDecoderLayer(model_dim, nhead, dropout));
+                layers->push_back(TransformerDecoderLayer(model_dim, ffn_dim, nhead, dropout));
             }
         }
 
-        auto forward(torch::Tensor& memory, torch::Tensor& memory_mask,
-                    torch::Tensor& tgt, torch::Tensor& tgt_mask) -> torch::Tensor {
+        auto forward(torch::Tensor tgt, torch::Tensor tgt_mask, torch::Tensor memory, torch::Tensor memory_mask) -> torch::Tensor {
             // tgt: [batch_size, tgt_len]
             // memory: [batch_size, src_len, model_dim]
             // tgt_mask: [batch_size, 1, tgt_len]
             // memory_mask: [batch_size, 1, src_len]
             // return: [batch_size, tgt_len, model_dim]
 
-            auto x = tgt;
-            x = position_embedding(x); // [batch_size, tgt_len, model_dim]
-            x = dropout(x);
-            x = norm1(x);
+            auto x = position_embedding(tgt); // [batch_size, tgt_len, model_dim]
+            //x = dropout(x); already applied by position_embedding
 
-            for (int i = 0; i < num_layers; ++i) {
-                x = layers->at<TransformerDecoderLayerImpl>(i).forward(memory, memory_mask, x, tgt_mask);
+            for (int i = 0; i < num_layers; i++) {
+                x = layers->at<TransformerDecoderLayerImpl>(i).forward(x, tgt_mask, memory, memory_mask);
             }
             //x = lm_head(x); // [batch_size, tgt_len, vocab_size]
+            x = norm(x);
             return x;
         }
     };

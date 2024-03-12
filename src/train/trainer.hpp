@@ -227,7 +227,7 @@ namespace tahoma::train {
             LOG::info("Validation finished. Avg loss: {:.5f}", stats.avg_loss());
             f32 valid_loss = stats.avg_loss();
             // TODO: support multiple validation metrics
-
+            // maybe we should save "last" by default.
             switch (_stopper.is_stop(valid_loss)) {
                 case StopperStatus::STOP: // stop training
                     save_checkpoint("last");

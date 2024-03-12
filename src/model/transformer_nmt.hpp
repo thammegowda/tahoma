@@ -37,6 +37,7 @@ namespace tahoma::model {
                 register_module("encoder", TransformerEncoder(
                 src_vocab_size,
                 model_dim,
+                model_dim * 4,
                 args["attn_heads"].as<int>(),
                 args["encoder_layers"].as<int>(),
                 args["dropout"].as<double>()))
@@ -45,6 +46,7 @@ namespace tahoma::model {
                 register_module("decoder",  TransformerDecoder(
                 tgt_vocab_size,
                 model_dim,
+                model_dim * 4,
                 args["attn_heads"].as<int>(),
                 args["decoder_layers"].as<int>(),
                 args["dropout"].as<double>()))
@@ -61,7 +63,7 @@ namespace tahoma::model {
             auto src_mask = std::any_cast<Tensor>(args["src_mask"]); // [batch_size, src_len]
             auto tgt_mask = std::any_cast<Tensor>(args["tgt_mask"]); // [batch_size, tgt_len]
             auto memory = encoder(src, src_mask); // [batch_size, src_len, model_dim]
-            auto output = decoder(memory, src_mask, tgt, tgt_mask); // [batch_size, tgt_len, model_dim]
+            auto output = decoder(tgt, tgt_mask, memory, src_mask); // [batch_size, tgt_len, model_dim]
             //output = lm_head(output); // [batch_size, tgt_len, tgt_vocab_size]
             return { {"result", output} };
         }
