@@ -96,7 +96,7 @@ namespace tahoma::layer {
             nhead{ nhead }
         {}
 
-        auto forward(torch::Tensor query, torch::Tensor key, torch::Tensor value, torch::Tensor key_padding_mask) 
+        auto forward(torch::Tensor query, torch::Tensor key, torch::Tensor value, torch::Tensor key_padding_mask)
             -> std::pair<torch::Tensor, torch::Tensor> {
             // query:   [batch_size, tgt_len, model_dim]
             // key, val: [batch_size, src_len, model_dim]
@@ -112,11 +112,9 @@ namespace tahoma::layer {
             assert(key.size(2) == model_dim);
             assert(value.size(2) == model_dim);
             auto head_dim = model_dim / nhead;
-
             auto q = q_proj(query).view({ batch_size, tgt_len, nhead, head_dim }).transpose(1, 2); // [batch_size, nhead, tgt_len, head_dim]
             auto k = k_proj(key).view({ batch_size, src_len, nhead, head_dim }).transpose(1, 2); // [batch_size, nhead, src_len, head_dim]
             auto v = v_proj(value).view({ batch_size, src_len, nhead, head_dim }).transpose(1, 2); // [batch_size, nhead, src_len, head_dim]
-
             auto attn_weights = torch::matmul(q, k.transpose(-2, -1)); // [batch_size, nhead, tgt_len, src_len]
             attn_weights = attn_weights / std::sqrt(head_dim);
 
@@ -129,7 +127,7 @@ namespace tahoma::layer {
                     throw std::runtime_error("key_padding_mask must be a 4D tensor. given: [" +  _shape + "]");
                 }
                 float low_val = -1e9;
-                if (at::autocast::is_enabled()) {
+                if (at::autocast::is_autocast_enabled(query.device().type())){
                     low_val = -pow(2, 14);   // -16384.0f; TODO: check for bf16
                 }
                 attn_weights = attn_weights.masked_fill(key_padding_mask, low_val);

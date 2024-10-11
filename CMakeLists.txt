@@ -47,7 +47,7 @@ endif()
 
 
 if (USE_CUDA)
-    set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cu121" CACHE PATH "libTorch CUDA path")
+    set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cu124" CACHE PATH "libTorch CUDA path")
     if(NOT CUDA_TOOLKIT_ROOT_DIR)
         set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda" CACHE PATH "CUDA root path")
         #set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda-12.1" CACHE PATH "CUDA root path")

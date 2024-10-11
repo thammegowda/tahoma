@@ -148,7 +148,7 @@ namespace tahoma::train {
         auto step(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Tensor {
             torch::AutoGradMode enable_grad(mode == Mode::TRAINING); // RAII
              if (_fp16_enabled) {  //__enter__()
-                at::autocast::set_enabled(true);
+                at::autocast::set_autocast_enabled(_device.type(), true);
             }
             if (mode == Mode::TRAINING){
                 _optimizer->zero_grad();
@@ -197,7 +197,7 @@ namespace tahoma::train {
                 stats.update(loss.item().toDouble(), labels.size(0), normalizer, _scheduler->get_last_rate());
                 if (_fp16_enabled) {  // __exit__()
                     at::autocast::clear_cache();
-                    at::autocast::set_enabled(false);
+                    at::autocast::set_autocast_enabled(_device.type(), false);
                 }
                 if (mode == Mode::TRAINING){
                     torch::nn::utils::clip_grad_norm_(_model->parameters(), _config["trainer"]["clip_grad"].as<f32>(5.0));

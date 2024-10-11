@@ -3,9 +3,9 @@ set -euo pipefail
 MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 # versions
-LIBTORCH_VERSION=2.1.0
-CUDA_VERSION=cu121
-ROCM_VERSION=rocm5.6
+LIBTORCH_VERSION=2.4.1
+CUDA_VERSION=cu124
+ROCM_VERSION=rocm6.1
 DEBUG=0
 
 libtorch_base="https://download.pytorch.org/libtorch"

@@ -46,7 +46,7 @@ trainer:
     - 128
     - 128
   max_length_crop: true
-  fp16: true
+  fp16: false
   chunk_size: 8
   loader_threads: 6
   log_frequency: 50u
