@@ -16,6 +16,7 @@ using namespace tahoma;
 using namespace torch::indexing;
 using namespace tahoma::layer;
 
+
 namespace tahoma::model {
 
 
@@ -62,11 +63,11 @@ namespace tahoma::model {
         }
 
         virtual auto forward(Pack& args) -> Pack override {
-            auto seq = std::any_cast<Tensor>(args["seq"]); // [batch_size, seq_len]
+            auto seq_ids = std::any_cast<Tensor>(args["seq_ids"]); // [batch_size, seq_len]
             auto seq_mask = std::any_cast<Tensor>(args["seq_mask"]); // [batch_size, seq_len]
             // seq: [batch_size, seq_len]
             // return: [batch_size, tgt_len, tgt_vocab_size]
-            auto output = decoder(seq, seq_mask); // [batch_size, tgt_len, model_dim]
+            auto output = decoder(seq_ids, seq_mask); // [batch_size, tgt_len, model_dim]
             //output = lm_head(output); // [batch_size, tgt_len, tgt_vocab_size]
             return { {"result", output} };
         }

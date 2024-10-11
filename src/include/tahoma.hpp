@@ -85,6 +85,3 @@ namespace tahoma {
     };
 
 } // namespace tahoma
-
-
-

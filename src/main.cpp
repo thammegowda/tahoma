@@ -6,7 +6,7 @@
 
  auto trainer_args(int argc, char* argv[]) -> argparse::ArgumentParser {
     argparse::ArgumentParser parser("trainer");
-    parser.add_argument("-v", "--verbose").help("Increase log verbosity")
+    parser.add_argument("-V", "--verbose").help("Increase log verbosity")
         .default_value(false).implicit_value(true);
     parser.add_argument("work_dir").help("Working directory").required();
     parser.add_argument("-c", "--config").help("Config file. Optional: default is config.toml in work_dir");

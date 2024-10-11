@@ -183,6 +183,13 @@ namespace tahoma::data {
 
         ~DataLoader() {}
 
+        inline auto output_vocab() -> std::shared_ptr<sp::SentencePieceProcessor> {
+            if (vocabs.empty()) {
+                throw runtime_error("Vocabs vector is empty");
+            }
+            return vocabs.back();
+        }
+
         auto read_lines(vector<string> data_paths) -> std::generator<vector<string>> {
              if (data_paths.empty()) {
                 throw runtime_error("No data files specified");

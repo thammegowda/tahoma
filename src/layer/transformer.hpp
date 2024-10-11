@@ -124,7 +124,7 @@ namespace tahoma::layer {
                 // insert head dim
                 //key_padding_mask = key_padding_mask.unsqueeze(1); // [batch_size, 1, 1, src_len]
                 if (key_padding_mask.sizes().size() != 4){ // must be a 4D tensor
-                    string _shape = ""; 
+                    string _shape = "";
                     for (auto i : key_padding_mask.sizes()) { _shape += std::to_string(i) + ", "; }
                     throw std::runtime_error("key_padding_mask must be a 4D tensor. given: [" +  _shape + "]");
                 }
@@ -146,7 +146,7 @@ namespace tahoma::layer {
         }
     };
     TORCH_MODULE(MultiheadAttention);
-    
+
 
     struct TransformerEncoderLayerImpl : public nn::Module {
         nn::LayerNorm norm1;
@@ -166,7 +166,7 @@ namespace tahoma::layer {
                 register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim }) )))},
             self_attn{register_module("self_attn", MultiheadAttention(model_dim, nhead, dropout))},
             dropout1{ register_module("dropout1", nn::Dropout(nn::DropoutOptions(dropout))) },
-            
+
             norm2{ register_module("norm2", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
             ffn{ register_module("ffn", FFSubLayer(model_dim, ffn_dim, dropout)) },
             dropout2{ register_module("dropout2", nn::Dropout(nn::DropoutOptions(dropout))) }
@@ -229,33 +229,33 @@ namespace tahoma::layer {
 
     struct TransformerDecoderLayerImpl : public nn::Module {
 
-        
+
         nn::LayerNorm norm1;
         MultiheadAttention self_attn;
         nn::Dropout dropout1;
-        
+
         nn::LayerNorm norm2;
         MultiheadAttention src_attn;
         nn::Dropout dropout2;
-        
+
         nn::LayerNorm norm3;
         FFSubLayer ffn;
         nn::Dropout dropout3;
 
         TransformerDecoderLayerImpl(int model_dim, int ffn_dim, int nhead, double dropout = 0.1) :
             norm1 { ( // using comma operator to assert multiple conditions before first initialization
-                assert(model_dim > 0), 
+                assert(model_dim > 0),
                 assert(nhead > 0),
-                assert(model_dim % nhead == 0), 
+                assert(model_dim % nhead == 0),
                 assert(ffn_dim > 0),
                 register_module("norm1", nn::LayerNorm(nn::LayerNormOptions({ model_dim })))) },
             self_attn {register_module("self_attn", MultiheadAttention(model_dim, nhead, dropout))},
             dropout1 { register_module("dropout1", nn::Dropout(nn::DropoutOptions(dropout))) },
-            
+
             norm2 { register_module("norm2", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
             src_attn { register_module("src_attn", MultiheadAttention(model_dim, nhead, dropout)) },
             dropout2 { register_module("dropout2", nn::Dropout(nn::DropoutOptions(dropout))) },
-           
+
             norm3 { register_module("norm3", nn::LayerNorm(nn::LayerNormOptions({ model_dim }))) },
             ffn { register_module("ffn", FFSubLayer(model_dim, ffn_dim, dropout)) },
             dropout3 { register_module("dropout3", nn::Dropout(nn::DropoutOptions(dropout))) }
@@ -273,7 +273,7 @@ namespace tahoma::layer {
             torch::Tensor x = norm1(tgt);
             x = self_attn(x, x, x, tgt_mask).first; // [batch_size, tgt_len, model_dim]
             tgt = tgt + dropout1(x);
-    
+
             // Source attention sublayer
             x = norm2(tgt);
             x = src_attn(x, memory, memory, memory_mask).first; // [batch_size, tgt_len, model_dim]

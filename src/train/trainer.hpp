@@ -40,16 +40,17 @@ namespace tahoma::train {
         fs::path _work_dir;
         config::Config _config;
         std::shared_ptr<model::LanguageModel> _model;
+        TaskType _task_type;
         //nn::AnyModule _model;
         nn::AnyModule _projector;
-        shared_ptr<optim::Optimizer> _optimizer;
-        shared_ptr<train::LRScheduler> _scheduler;
+        std::shared_ptr<optim::Optimizer> _optimizer;
+        std::shared_ptr<train::LRScheduler> _scheduler;
         tahoma::data::DataLoader _data_loader;
 
         bool _fp16_enabled;
         int64_t _pad_id = 0;
         int64_t _bos_id = 1;
-        shared_ptr<LossComputer> _loss_computer;
+        std::shared_ptr<LossComputer> _loss_computer;
         torch::Device _device;
         data::Batch _sample_batch;
         Stopper _stopper;
@@ -60,14 +61,15 @@ namespace tahoma::train {
             _config{ conf },
             _device{ DEVICE },
             _model{ init_model(_config, _device)},
+            _task_type{ _model->task_type() },
             _projector{ _model->lm_head },
             _optimizer{ init_optimizer(_config, _model) },
             _scheduler{ init_scheduler(_config, *_optimizer) },
 
             _data_loader{ tahoma::data::DataLoader(_config) },
             _fp16_enabled{ _config["trainer"]["fp16"].as<bool>(false) },
-            _pad_id {_data_loader.vocabs[1]->pad_id()},   //vocabs[1] is the target vocab
-            _bos_id {_data_loader.vocabs[1]->bos_id()},
+            _pad_id {_data_loader.output_vocab()->pad_id()},
+            _bos_id {_data_loader.output_vocab()->bos_id()},
             _loss_computer{  init_loss_computer(_config, _projector, _pad_id) },
             _sample_batch{ _data_loader.get_samples(_config["validator"]["data"].as<vector<string>>(), /*n_samples*/5) },
             _stopper{ _config["trainer"]["early_stopping"].as<int>(8) }
@@ -94,16 +96,10 @@ namespace tahoma::train {
             torch::save(_model, checkpoint_file.string());
         }
 
-        auto step(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Tensor {
-            torch::AutoGradMode enable_grad(mode == Mode::TRAINING); // RAII
-             if (_fp16_enabled) {  //__enter__()
-                at::autocast::set_enabled(true);
-            }
-            if (mode == Mode::TRAINING){
-                _optimizer->zero_grad();
-            }
-            batch.contiguous();
-            batch = batch.to(_device);
+
+        auto step_nmt(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Pack {
+
+            assert(batch.fields.size() == 2 && "fields vector must have exactly two elements");
             auto src_ids = batch.fields[0];  // [batch_size, seq_len]
             auto tgt_ids = batch.fields[1];   // [batch_size, seq_len]
             //FIME: add bos and eos tokens to tgt_ids. Offset tgt_ids by 1
@@ -114,43 +110,91 @@ namespace tahoma::train {
             auto tgt_mask_padding = bos_tgt_ids.eq(_pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
             auto tgt_mask_autoreg = subsequent_mask(bos_tgt_ids.size(1), _device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len]
             auto tgt_mask = tgt_mask_padding | tgt_mask_autoreg.type_as(tgt_mask_padding); // [batch_size, 1, seq_len, seq_len]
-            auto normalizer = (bos_tgt_ids != _pad_id).sum().item().toInt(); // #total - #mask
+            auto normalizer = (bos_tgt_ids != _pad_id).sum().item().toLong(); // #total - #mask
 
             bool debug_input = false;
-            
-            auto log_batch = [&](){
-                // print batch for debugging
-                for (auto i=0; i <batch.examples.size(); i++){
-                    auto ex = batch.examples[i];
-                    str src = ex.fields[0];
-                    str ref = ex.fields[1];
-                    std::cerr << "SRC: " << src << std::endl;
-                    std::cerr << "REF: " << ref << std::endl;
-                }
-                std::cerr << "src_ids: " << src_ids << std::endl;
-                std::cerr << "bos_tgt_ids: " << bos_tgt_ids << std::endl;
-                std::cerr << "pad_id: " << _pad_id << std::endl;
-                std::cerr << "src_mask: " << src_mask << std::endl;
-                std::cerr << "tgt_mask: " << tgt_mask << std::endl;
-                std::cerr << "normalizer: " << normalizer << std::endl;
-            };
-            if (debug_input) {
-                log_batch();   
-            }
             //auto features = _model->forward(src_ids, src_mask, bos_tgt_ids, tgt_mask);
             Pack pack = {
                 {"src", src_ids},
                 {"src_mask", src_mask},
                 {"tgt", bos_tgt_ids},
-                {"tgt_mask", tgt_mask}
+                {"tgt_mask", tgt_mask},
+                {"normalizer", normalizer},
+                {"labels", tgt_ids}
             };
+           return pack;
+        }
+
+        auto step_lm(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Pack {
+            auto inp_ids = batch.fields[0];  // [batch_size, seq_len]
+            //FIME: add bos and eos tokens to tgt_ids. Offset tgt_ids by 1
+            auto _bos_col = torch::full({ inp_ids.size(0), 1 }, _bos_id, torch::dtype(torch::kInt64).device(_device));
+            auto bos_tgt_ids = torch::cat({_bos_col, inp_ids}, 1);
+
+            auto tgt_mask_padding = bos_tgt_ids.eq(_pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
+            auto tgt_mask_autoreg = subsequent_mask(bos_tgt_ids.size(1), _device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len]
+            auto tgt_mask = tgt_mask_padding | tgt_mask_autoreg.type_as(tgt_mask_padding); // [batch_size, 1, seq_len, seq_len]
+            auto normalizer = (bos_tgt_ids != _pad_id).sum().item().toLong(); // #total - #mask
+            Pack pack = {
+                {"seq_ids", bos_tgt_ids},
+                {"seq_mask", tgt_mask},
+                {"normalizer", normalizer},
+                {"labels", inp_ids}
+            };
+            return pack;
+        }
+
+
+        auto step(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Tensor {
+            torch::AutoGradMode enable_grad(mode == Mode::TRAINING); // RAII
+             if (_fp16_enabled) {  //__enter__()
+                at::autocast::set_enabled(true);
+            }
+            if (mode == Mode::TRAINING){
+                _optimizer->zero_grad();
+            }
+            batch.contiguous();
+            batch = batch.to(_device);
+            Pack pack;
+            switch (_task_type) {
+                case TaskType::LM:
+                    pack = step_lm(batch, stats, mode);
+                    break;
+                case TaskType::NMT:
+                    pack = step_nmt(batch, stats, mode);
+                    break;
+                default:
+                    throw std::runtime_error("Unknown task type");
+            }
+            //////// DEBUGGING BEGIN ////////
+            auto log_batch = [&](){
+                // print batch for debugging
+                for (auto i=0; i <batch.examples.size(); i++){
+                    auto ex = batch.examples[i];
+                    for (size_t j = 0; j < ex.fields.size(); ++j) {
+                        std::cerr << "Field " << j << ": " << ex.fields[j] << std::endl;
+                    }
+                }
+                for (const auto& [key, value] : pack) {
+                    std::cerr << key << ": " << std::any_cast<Tensor>(value) << std::endl;
+                }
+            };
+            bool debug_input = false;
+            if (debug_input) {
+                log_batch();
+            }
+            //////// DEBUGGING END////////
+
+
             auto result = _model->forward(pack);
             auto features = std::any_cast<Tensor>(result["result"]); // [batch_size, seq_len, model_dim]
             // skip the last token (EOS) in features, as it is not used in loss computation
             features = features.index({ Slice(), Slice(0, -1), Slice() }); // [batch_size, seq_len, model_dim]
             try {
-                auto loss = _loss_computer->compute(features, tgt_ids, normalizer, mode);
-                stats.update(loss.item().toDouble(), tgt_ids.size(0), normalizer, _scheduler->get_last_rate());
+                auto labels = std::any_cast<Tensor>(pack["labels"]);
+                auto normalizer = std::any_cast<long>(pack["normalizer"]);
+                auto loss = _loss_computer->compute(features, labels, normalizer, mode);
+                stats.update(loss.item().toDouble(), labels.size(0), normalizer, _scheduler->get_last_rate());
                 if (_fp16_enabled) {  // __exit__()
                     at::autocast::clear_cache();
                     at::autocast::set_enabled(false);
@@ -215,7 +259,7 @@ namespace tahoma::train {
             }
         }
 
-        void log_samples(){
+        void log_nmt_samples(){
             std::shared_ptr<model::TransformerNMTImpl> model = std::dynamic_pointer_cast<model::TransformerNMTImpl>(_model);
             auto decoder = inference::Decoder(model, _projector, _data_loader.vocabs, _device);
             for (auto i=0; i < _sample_batch.size(); i++) {
@@ -236,7 +280,16 @@ namespace tahoma::train {
             torch::AutoGradMode enable_grad(false);
             _model->eval();
             if (show_samples) {
-                log_samples();
+                switch (_task_type) {
+                    case TaskType::NMT:
+                        log_nmt_samples();
+                        break;
+                    case TaskType::LM:
+                        LOG::warn("Log samples is not supported for LM task");
+                        break;
+                    default:
+                        LOG::warn("Unknown task type");
+                }
             }
             auto log_frequency = _config["validator"]["log_frequency"].as<string>("5000u");
             auto stats = StatsCounter(log_frequency, /*name*/"Validation");

@@ -2,7 +2,7 @@ model:
   name: transformer_lm
   args:
     vocab_size: 8000
-    decoder_layers: 6
+    layers: 6
     model_dim: 512
     attn_heads: 8
     ffn_dim: 2048
