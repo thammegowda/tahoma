@@ -1,31 +1,28 @@
-#pragma once
 
-#include "../train/utils.hpp"
-#include "../model/transformer_nmt.hpp"
+#include <tahoma.h>
+#include <tahoma/model/transformer_nmt.h>
+#include <tahoma/inference/decoder.h>
+#include <tahoma/train/utils.h>
 
 
+namespace sp = sentencepiece;
+using namespace tahoma;
+using namespace torch::indexing;
 
 namespace tahoma::inference {
 
-    class Decoder {
-    private:
-        std::shared_ptr<tahoma::model::TransformerNMTImpl> _model;
-        nn::AnyModule _lm_head;
-        vector<shared_ptr<sp::SentencePieceProcessor>> _vocabs;
-        torch::Device _device;
-    public:
-        Decoder(std::shared_ptr<tahoma::model::TransformerNMTImpl> _model,
-            nn::AnyModule lm_head,
-            vector<shared_ptr<sp::SentencePieceProcessor>> _vocabs,
-            torch::Device _device):
-            _model {_model}, _lm_head {lm_head}, _vocabs{_vocabs}, _device{_device}
-        {
-            if (_vocabs.size() != 2){
-                throw std::invalid_argument("Vocab size must be 2, but found " + _vocabs.size());
-            }
+    Decoder::Decoder(std::shared_ptr<tahoma::model::TransformerNMTImpl> _model,
+        nn::AnyModule lm_head,
+        vector<std::shared_ptr<sp::SentencePieceProcessor>> _vocabs,
+        torch::Device _device):
+        _model {_model}, _lm_head {lm_head}, _vocabs{_vocabs}, _device{_device}
+    {
+        if (_vocabs.size() != 2){
+            throw std::invalid_argument("Vocab size must be 2, but found " + _vocabs.size());
         }
+    }
 
-        auto greedy_decode(str src, i32 max_len=128) -> std::tuple<str, f32>{
+        auto Decoder::greedy_decode(str src, i32 max_len) -> std::tuple<str, f32>{
             auto src_vocab = _vocabs[0];
             auto tgt_vocab = _vocabs[1];
             vector<int> src_ids_vec = _vocabs[0]->EncodeAsIds(src);
@@ -38,7 +35,7 @@ namespace tahoma::inference {
             f32 total_score = 0.0;
             for (int i=0; i < max_len; i++){
                 auto tgt_len = tgt_ids.size(1);
-                auto tgt_mask = tahoma::train::subsequent_mask(tgt_len, _device).to(torch::kBool).view({1, 1, tgt_len, tgt_len});  // [batch=1, head=1, tgt_len, tgt_len]
+                auto tgt_mask = train::subsequent_mask(tgt_len, _device).to(torch::kBool).view({1, 1, tgt_len, tgt_len});  // [batch=1, head=1, tgt_len, tgt_len]
                 auto features = _model->decoder(tgt_ids, tgt_mask, memory, src_mask);
                 features = features.index({Slice(), -1, Slice()});
                 auto output = _lm_head.forward(features);
@@ -61,5 +58,4 @@ namespace tahoma::inference {
             auto avg_score = total_score / tgt_ids_vec.size();
             return {tgt_tokens, avg_score};
         }
-    };
 }

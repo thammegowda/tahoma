@@ -1,9 +1,9 @@
-#pragma once
 #include <iostream>
 #include <memory>
 #include <chrono>
 
-#include "../common/config.hpp"
+#include <tahoma.h>
+#include <tahoma/train/stats_counter.h>
 
 namespace nn = torch::nn;
 namespace optim = torch::optim;
@@ -13,26 +13,7 @@ using namespace chrono;
 
 namespace tahoma::train {
 
-    struct StatsCounter {
-        int64_t step_num = 0;
-        int64_t tot_sents = 0;
-        int64_t tot_tokens = 0;
-        double tot_loss = 0.0;
-
-        string log_frequency = "";
-        int64_t log_frequency_step = -1;
-        int64_t log_frequency_tokens = -1;
-        int64_t log_frequency_time_sec = -1;
-        int16_t log_first = 0;
-
-        int64_t last_log_step = 0;
-        int64_t last_log_tokens = 0;
-        chrono::time_point<chrono::high_resolution_clock> last_log_time = chrono::high_resolution_clock::now();
-        chrono::time_point<chrono::high_resolution_clock> start_time = chrono::high_resolution_clock::now();
-        string name = "";
-
-
-        auto set_log_frequency(string arg) {  // log as in logging (not logarithm)
+        void StatsCounter::set_log_frequency(string arg) {  // log as in logging (not logarithm)
             /*
             This is inspired by Marian NMT.
             arg should be an integer with a suffix
@@ -88,25 +69,11 @@ namespace tahoma::train {
             }
         }
 
-        // add constructor
-        StatsCounter() {}
-        StatsCounter(string log_frequency, string name="", int16_t log_first=0) 
-            : name(name), log_first(log_first){
-            set_log_frequency(log_frequency);
-            
-        }
-
-        // copy and move
-        StatsCounter(const StatsCounter& other) = default;
-        StatsCounter(StatsCounter&& other) = default;
-        StatsCounter& operator=(const StatsCounter& other) = default;
-        StatsCounter& operator=(StatsCounter&& other) = default;
-
-        float avg_loss() {
+        float StatsCounter::avg_loss() {
             return step_num > 0 ? tot_loss / step_num : 0.0;
         }
 
-        auto update(float loss, size_t num_sents, size_t num_tokens, f32 lr, size_t num_steps = 1) -> StatsCounter& {
+        auto StatsCounter::update(float loss, size_t num_sents, size_t num_tokens, f32 lr, size_t num_steps) -> StatsCounter& {
             tot_sents += num_sents;
             tot_tokens += num_tokens;
             step_num += num_steps;
@@ -137,5 +104,5 @@ namespace tahoma::train {
             }
             return *this;
         }
-    };
+
 }

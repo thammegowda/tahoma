@@ -1,8 +1,9 @@
 #include <iostream>
 #include <argparse.hpp>
-#include <tahoma.hpp>
-#include "train/trainer.hpp"
+#include <tahoma.h>
+#include <tahoma/train/trainer.h>
 
+using namespace tahoma;
 
  auto trainer_args(int argc, char* argv[]) -> argparse::ArgumentParser {
     argparse::ArgumentParser parser("trainer");
@@ -29,7 +30,7 @@ int trainer_main(int argc, char* argv[]){
         spdlog::set_level(spdlog::level::debug);
     }
     if (torch::cuda::is_available()) {
-        vector<string> device_ids;
+        std::vector<std::string> device_ids;
         for (auto i=0; i < torch::cuda::device_count(); i++){
             device_ids.push_back(fmt::format("{}", i));
         }
@@ -52,7 +53,6 @@ int trainer_main(int argc, char* argv[]){
 
 
 int main(int argc, char* argv[]) {
-    using namespace tahoma;
     int _code = global_setup();
     if (_code != 0){
         return _code;

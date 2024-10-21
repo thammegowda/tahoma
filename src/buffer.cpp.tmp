@@ -4,8 +4,6 @@ It is used to test the code snippets from the source code to quickly debug and t
 */
 
 #include <torch/torch.h>
-#include "common/config.hpp"
-#include "train/utils.hpp"
 #include "train/trainer.hpp"
 
 using namespace std;

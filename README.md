@@ -58,3 +58,27 @@ make -j
 ## Build LibTorch from Source
 
 This project relies on libTorch. It'd be useful to know how to build libTorch
+
+
+
+## Developer Notes
+
+. include/ <-- Header files (.h)
+. src/   <--  All implementations (.cpp)
+
+Header files and implementations should mirror each other.
+
+Layer is a lower level code, model is higher level abstraction. Model uses one or more layers.
+
+
+```
+include/layer.h   <--  common code for all layers, e.g. base classes
+include/layer/transformer.h <--  transformer layer specific code
+include/layer/rnn.h  <-- rnn layer specific coide
+
+include/model.h  <-- common code for all e.g. base classes
+include/transformer_lm.h  <-- LM
+include/transformer_nmt.h  <-- NMT
+
+```
+

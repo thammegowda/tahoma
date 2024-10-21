@@ -1,95 +1,66 @@
-#pragma once
-#include <iostream>
-#include <coroutine>
-#include <ranges>
-#include <vector>
-#include <memory>
-#include <chrono>
-#include <__generator.hpp>  //reference implementation of generator
 
+#include <coroutine>
 #include <ATen/autocast_mode.h>
 #include <torch/torch.h>
 #include <sentencepiece_processor.h>
 
-#include <tahoma.hpp>
-#include "../common/config.hpp"
-#include "../common/data.hpp"
-#include "../model/transformer_nmt.hpp"
-#include "../model/transformer_lm.hpp"
-#include "./utils.hpp"
-#include "./stats_counter.hpp"
-#include "../inference/decoder.hpp"
+#include <tahoma.h>
+#include <tahoma/config.h>
+#include <tahoma/data.h>
+#include <tahoma/model.h>
+#include <tahoma/model/transformer_nmt.h>
+#include <tahoma/model/transformer_lm.h>
+#include <tahoma/inference/decoder.h>
+#include <tahoma/train/stats_counter.h>
+#include <tahoma/train/criterion.h>
+#include <tahoma/train/loss_computer.h>
+#include <tahoma/train/utils.h>
+#include <tahoma/train/trainer.h>
 
 namespace nn = torch::nn;
 namespace optim = torch::optim;
 namespace sp = sentencepiece;
 namespace fs = std::filesystem;
 
-using namespace std;
-using namespace torch::indexing;
 using namespace tahoma;
-using namespace chrono;
 
 namespace tahoma::train {
 
     auto DEVICE = torch::Device(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
 
-    //template <typename M = model::LanguageModel>
-    class Trainer {
-    protected:
-        fs::path _work_dir;
-        config::Config _config;
-        std::shared_ptr<model::LanguageModel> _model;
-        TaskType _task_type;
-        //nn::AnyModule _model;
-        nn::AnyModule _projector;
-        std::shared_ptr<optim::Optimizer> _optimizer;
-        std::shared_ptr<train::LRScheduler> _scheduler;
-        tahoma::data::DataLoader _data_loader;
 
-        bool _fp16_enabled;
-        int64_t _pad_id = 0;
-        int64_t _bos_id = 1;
-        std::shared_ptr<LossComputer> _loss_computer;
-        torch::Device _device;
-        data::Batch _sample_batch;
-        Stopper _stopper;
+    Trainer::Trainer(fs::path work_dir, config::Config conf)
+        : _work_dir{ work_dir },
+        _config{ conf },
+        _device{ DEVICE },
+        _model{ init_model(_config, _device)},
+        _task_type{ _model->task_type() },
+        _projector{ _model->lm_head },
+        _optimizer{ init_optimizer(_config, _model) },
+        _scheduler{ init_scheduler(_config, *_optimizer) },
 
-    public:
-        Trainer(fs::path work_dir, config::Config conf)
-            : _work_dir{ work_dir },
-            _config{ conf },
-            _device{ DEVICE },
-            _model{ init_model(_config, _device)},
-            _task_type{ _model->task_type() },
-            _projector{ _model->lm_head },
-            _optimizer{ init_optimizer(_config, _model) },
-            _scheduler{ init_scheduler(_config, *_optimizer) },
-
-            _data_loader{ tahoma::data::DataLoader(_config) },
-            _fp16_enabled{ _config["trainer"]["fp16"].as<bool>(false) },
-            _pad_id {_data_loader.output_vocab()->pad_id()},
-            _bos_id {_data_loader.output_vocab()->bos_id()},
-            _loss_computer{  init_loss_computer(_config, _projector, _pad_id) },
-            _sample_batch{ _data_loader.get_samples(_config["validator"]["data"].as<vector<string>>(), /*n_samples*/5) },
-            _stopper{ _config["trainer"]["early_stopping"].as<int>(8) }
-        {
-            spdlog::info("Trainer initialized; work_dir={}, cuda_available?={} device={}; fp16={}",
-                work_dir, torch::cuda::is_available(), _device == torch::kCUDA ? "cuda" : "cpu", _fp16_enabled);
-            spdlog::info("Early stopping enabled? {}, patience: {}",  _stopper.patience > 0 ? "Yes" : "No",  _stopper.patience);
-            // check if pad_id is correct
-            if (_pad_id < 0){
-                throw std::runtime_error("pad_id is negative, implying it is disabled, however it is required. Please create a new vocab with pad_id.");
-            }
+        _data_loader{ tahoma::data::DataLoader(_config) },
+        _fp16_enabled{ _config["trainer"]["fp16"].as<bool>(false) },
+        _pad_id {_data_loader.output_vocab()->pad_id()},
+        _bos_id {_data_loader.output_vocab()->bos_id()},
+        _loss_computer{  init_loss_computer(_config, _projector, _pad_id) },
+        _sample_batch{ _data_loader.get_samples(_config["validator"]["data"].as<std::vector<std::string>>(), /*n_samples*/5) },
+        _stopper{ _config["trainer"]["early_stopping"].as<int>(8) }
+    {
+        spdlog::info("Trainer initialized; work_dir={}, cuda_available?={} device={}; fp16={}",
+            work_dir, torch::cuda::is_available(), _device == torch::kCUDA ? "cuda" : "cpu", _fp16_enabled);
+        spdlog::info("Early stopping enabled? {}, patience: {}",  _stopper.patience > 0 ? "Yes" : "No",  _stopper.patience);
+        // check if pad_id is correct
+        if (_pad_id < 0){
+            throw std::runtime_error("pad_id is negative, implying it is disabled, however it is required. Please create a new vocab with pad_id.");
         }
+    }
 
-        Trainer(fs::path work_dir, fs::path config_file)
-            : Trainer(work_dir, init_config(work_dir, config_file))
-        {}
+    Trainer::Trainer(fs::path work_dir, fs::path config_file)
+        : Trainer(work_dir, init_config(work_dir, config_file))
+    {}
 
-        ~Trainer() {}
-
-        auto save_checkpoint(string tag = "") {
+        void Trainer::save_checkpoint(std::string tag) {
             auto filename = fmt::format("model{}.pt", tag.size() > 0 ? "." + tag : "");
             auto checkpoint_file = _work_dir / filename;
             spdlog::info("Saving checkpoint to {}", checkpoint_file);
@@ -97,7 +68,7 @@ namespace tahoma::train {
         }
 
 
-        auto step_nmt(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Pack {
+        auto Trainer::step_nmt(data::Batch& batch, StatsCounter& stats, const Mode mode) -> Pack {
 
             assert(batch.fields.size() == 2 && "fields vector must have exactly two elements");
             auto src_ids = batch.fields[0];  // [batch_size, seq_len]
@@ -125,7 +96,7 @@ namespace tahoma::train {
            return pack;
         }
 
-        auto step_lm(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Pack {
+        auto Trainer::step_lm(data::Batch& batch, StatsCounter& stats, const Mode mode) -> Pack {
             auto inp_ids = batch.fields[0];  // [batch_size, seq_len]
             //FIME: add bos and eos tokens to tgt_ids. Offset tgt_ids by 1
             auto _bos_col = torch::full({ inp_ids.size(0), 1 }, _bos_id, torch::dtype(torch::kInt64).device(_device));
@@ -145,7 +116,7 @@ namespace tahoma::train {
         }
 
 
-        auto step(data::Batch& batch, StatsCounter& stats, const Mode mode = Mode::TRAINING) -> Tensor {
+        auto Trainer::step(data::Batch& batch, StatsCounter& stats, const Mode mode) -> Tensor {
             torch::AutoGradMode enable_grad(mode == Mode::TRAINING); // RAII
              if (_fp16_enabled) {  //__enter__()
                 at::autocast::set_autocast_enabled(_device.type(), true);
@@ -212,11 +183,11 @@ namespace tahoma::train {
         }
 
 
-        void train() {
-            LOG::info("Moving to device {}", _device == torch::kCUDA ? "cuda" : "cpu");
+        void Trainer::train() {
+            spdlog::info("Moving to device {}", _device == torch::kCUDA ? "cuda" : "cpu");
             _model->to(_device);
             size_t num_epochs = _config["trainer"]["epochs"].as<int>();
-            auto log_frequency = _config["trainer"]["log_frequency"].as<string>("25u");
+            auto log_frequency = _config["trainer"]["log_frequency"].as<std::string>("25u");
             auto checkpoint_frequency = _config["checkpoint"]["frequency"].as<size_t>(1000);
             auto validation_frequency = _config["validator"]["frequency"].as<size_t>(1000);
             spdlog::info("Training started; total epochs = {}; log_frequency={}", num_epochs, log_frequency);
@@ -233,10 +204,10 @@ namespace tahoma::train {
                         step(batch, stats, Mode::TRAINING);
                         n_skips = 0;
                     } catch (const BadBatchException& e) {
-                        LOG::error("Bad batch detected. Skipping batch. Error: {}", e.what());
+                        spdlog::error("Bad batch detected. Skipping batch. Error: {}", e.what());
                         n_skips++;
                         if (n_skips > MAX_BAD_SKIPS) {
-                            LOG::error("Too many bad batches. Aborting training training");
+                            spdlog::error("Too many bad batches. Aborting training training");
                             return;
                         }
                         continue;
@@ -246,7 +217,7 @@ namespace tahoma::train {
                     if (stats.step_num % validation_frequency == 0) {
                         bool is_early_stop = validate();
                         if (is_early_stop) {
-                            LOG::info("Early stopping at epoch {} step {}", epoch, stats.step_num);
+                            spdlog::info("Early stopping at epoch {} step {}", epoch, stats.step_num);
                             // todo: throw an EarlyStopException
                             return;
                         }
@@ -259,7 +230,7 @@ namespace tahoma::train {
             }
         }
 
-        void log_nmt_samples(){
+        void Trainer::log_nmt_samples(){
             std::shared_ptr<model::TransformerNMTImpl> model = std::dynamic_pointer_cast<model::TransformerNMTImpl>(_model);
             auto decoder = inference::Decoder(model, _projector, _data_loader.vocabs, _device);
             for (auto i=0; i < _sample_batch.size(); i++) {
@@ -273,7 +244,7 @@ namespace tahoma::train {
             }
         }
 
-        auto validate(bool show_samples=true) -> bool {
+        auto Trainer::validate(bool show_samples) -> bool {
             /**
              * Returns true if early stopping is triggered
             */
@@ -285,19 +256,19 @@ namespace tahoma::train {
                         log_nmt_samples();
                         break;
                     case TaskType::LM:
-                        LOG::warn("Log samples is not supported for LM task");
+                        spdlog::warn("Log samples is not supported for LM task");
                         break;
                     default:
-                        LOG::warn("Unknown task type");
+                        spdlog::warn("Unknown task type");
                 }
             }
-            auto log_frequency = _config["validator"]["log_frequency"].as<string>("5000u");
+            auto log_frequency = _config["validator"]["log_frequency"].as<std::string>("5000u");
             auto stats = StatsCounter(log_frequency, /*name*/"Validation");
-            LOG::info("Starting validation. log_frequency={}", stats.log_frequency);
+            spdlog::info("Starting validation. log_frequency={}", stats.log_frequency);
             for (auto batch : _data_loader.get_validation_data()) {
                 step(batch, stats, Mode::INFERENCE);
             }
-            LOG::info("Validation finished. Avg loss: {:.5f}", stats.avg_loss());
+            spdlog::info("Validation finished. Avg loss: {:.5f}", stats.avg_loss());
             f32 valid_loss = stats.avg_loss();
             // TODO: support multiple validation metrics
             // maybe we should save "last" by default.
@@ -315,9 +286,9 @@ namespace tahoma::train {
                     return false;
             }
         }
-    };
+
 
 }
 
 
-// AMP/fp16 is discussed here https://discuss.pytorch.org/t/deploy-mixed-precision-model-in-libtorch/89046/5 
+// AMP/fp16 is discussed here https://discuss.pytorch.org/t/deploy-mixed-precision-model-in-libtorch/89046/5

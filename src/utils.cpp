@@ -1,5 +1,3 @@
-#pragma once
-
 #include <fstream>
 #include <filesystem>
 #include <__generator.hpp>
@@ -7,11 +5,12 @@
 #include <algorithm>
 #include <vector>
 #include <string>
-#include <tahoma.hpp>
+#include <tahoma.h>
+
+
+using namespace tahoma;
 
 namespace tahoma::utils {
-
-    using namespace tahoma;
 
     std::generator<std::string> read_lines(std::string path){
         /**
@@ -42,7 +41,7 @@ namespace tahoma::utils {
     template <typename T>
     auto sample_n_items(std::generator<T> stream, i32 n) -> std::generator<T> {
         // buffer -> sample -> yield
-        vector<vector<string>> buffer;
+        std::vector<std::vector<std::string>> buffer;
         for (auto item : stream) {
             buffer.push_back(item);
         }
@@ -52,11 +51,11 @@ namespace tahoma::utils {
         }
     }
 
-    auto tensor_shape(Tensor tensor) -> string {
+    auto tensor_shape(Tensor tensor) -> std::string {
         /**
          * Return the shape of a tensor as a string.
         */
-        string shape = "";
+        std::string shape = "";
         for (auto size : tensor.sizes()) {
             if (shape != ""){
                 shape += ", ";

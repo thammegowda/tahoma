@@ -11,10 +11,11 @@ option(USE_CCACHE "Use ccache compiler cache (https://ccache.dev)" OFF)
 option(USE_CUDA "Use CUDA libtorch. Default is CPU only libtorch" OFF)
 option(USE_ROCM "Use ROCM libtorch. Default is CPU only libtorch" OFF)
 option(USE_PYTORCH "Use libtorch from the available pytorch installation
-     (i.e., torch.utils.cmake_prefix_path). This can be CPU/CUDA/ROCM build." OFF)
+(i.e., torch.utils.cmake_prefix_path). This can be CPU/CUDA/ROCM build." OFF)
 if (USE_CUDA AND USE_ROCM)
     message(FATAL_ERROR "USE_CUDA and USE_ROCM cannot be set at the same time")
 endif()
+option(COMPILE_TESTS "Compile tests under the ./tests directory" OFF)
 
 set(PYTHON_EXECUTABLE python CACHE FILEPATH "Python executable name path. Used to find libtorch from pytorch installation")
 find_package(Git QUIET)
@@ -45,15 +46,12 @@ if ((USE_CUDA AND USE_ROCM) OR
     message(FATAL_ERROR "Only one of USE_CUDA, USE_ROCM, USE_PYTORCH can be set")
 endif()
 
-
 if (USE_CUDA)
     set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cu124" CACHE PATH "libTorch CUDA path")
     if(NOT CUDA_TOOLKIT_ROOT_DIR)
         set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda" CACHE PATH "CUDA root path")
-        #set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda-12.1" CACHE PATH "CUDA root path")
     endif()
     set(CMAKE_CUDA_COMPILER ${CUDA_TOOLKIT_ROOT_DIR}/bin/nvcc)
-
 elseif (USE_ROCM)
     set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-rocm" CACHE PATH "libTorch ROCM path")
 elseif (USE_PYTORCH)
@@ -81,16 +79,16 @@ if(USE_CCACHE)
 endif()
 
 
-
 include_directories(
-    "${CMAKE_SOURCE_DIR}/libs/libtorch/include/torch/csrc/api/include"
+    #"${LIBTORCH_PATH}/include/torch/csrc/api/include"
+    "${LIBTORCH_PATH}/include"
+    "${LIBTORCH_PATH}/include/torch/csrc/api/include"
     #"${CMAKE_SOURCE_DIR}/libs/pytorch/torch/include/"
     "${CMAKE_SOURCE_DIR}/libs/sentencepiece/src"
     "${CMAKE_SOURCE_DIR}/libs/spdlog/include"
     "${CMAKE_SOURCE_DIR}/libs/yaml-cpp/include"
+    "${CMAKE_SOURCE_DIR}/include"
     )
-
-# "${CMAKE_SOURCE_DIR}/libs/tomlplusplus/include"
 
 
 ### SentencePiece library
@@ -103,5 +101,9 @@ set(EXT_LIBS ${EXT_LIBS} yaml-cpp)
 
 ###
 add_subdirectory(${CMAKE_SOURCE_DIR}/libs/backward-cpp)
-
 add_subdirectory(src)
+
+if(COMPILE_TESTS)
+    include(CTest)
+    add_subdirectory(tests)
+endif()
