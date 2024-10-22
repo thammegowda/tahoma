@@ -1,8 +1,6 @@
-
 set(TAHOMA_SOURCES
     ./config.cpp
     ./data.cpp
-    ./utils.cpp
     ./inference/decoder.cpp
     ./layer/transformer.cpp
     ./model/transformer_lm.cpp
@@ -15,15 +13,18 @@ set(TAHOMA_SOURCES
 )
 
 
-add_library(tahoma ${TAHOMA_SOURCES})
-set_target_properties(tahoma PROPERTIES ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-target_link_libraries(tahoma PUBLIC ${EXT_LIBS})
-target_include_directories(tahoma PUBLIC "${CMAKE_SOURCE_DIR}/include")
+add_library(tahoma_lib STATIC ${TAHOMA_SOURCES})
+set_target_properties(tahoma_lib PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    OUTPUT_NAME "tahoma")
+target_link_libraries(tahoma_lib PUBLIC ${EXT_LIBS})
+target_include_directories(tahoma_lib PUBLIC "${CMAKE_SOURCE_DIR}/include")
 
+#add_executable(tahoma_exe buffer.cpp ${BACKWARD_ENABLE})   # use this for debugging a piece of code
 add_executable(tahoma_exe main.cpp ${BACKWARD_ENABLE})
 set_target_properties(tahoma_exe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set_target_properties(tahoma_exe PROPERTIES OUTPUT_NAME "tahoma")
-target_link_libraries(tahoma_exe PUBLIC tahoma)
+target_link_libraries(tahoma_exe PUBLIC tahoma_lib)
 add_backward(tahoma_exe)   # debug info if process crashes
 
 
@@ -31,9 +32,4 @@ add_backward(tahoma_exe)   # debug info if process crashes
 #add_backward(mnist)   # debug info for crash
 #set_target_properties(mnist PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 #target_link_libraries(mnist ${EXT_LIBS})
-
-# add_executable(buffer buffer.cpp ${BACKWARD_ENABLE})
-# add_backward(buffer)   # debug info for crash
-# set_target_properties(buffer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-# target_link_libraries(buffer ${EXT_LIBS})
 

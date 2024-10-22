@@ -7,6 +7,8 @@ using namespace tahoma;
 
 namespace tahoma::data {
 
+    auto read_lines(std::string path) -> std::generator<std::string>;
+
     struct Example {
         i64 id;
         vector<str> fields;
@@ -50,7 +52,6 @@ namespace tahoma::data {
         ~Batch() = default;
     };
 
-
     auto load_vocabs(const config::Config& config) -> std::vector<std::shared_ptr<sentencepiece::SentencePieceProcessor>>;
 
     struct DataLoader {
@@ -75,4 +76,24 @@ namespace tahoma::data {
         auto get_data_sync(std::string dataset_name, std::string fallback_name="trainer") -> std::generator<data::Batch>;
         auto get_data_async(std::string dataset_name) -> std::generator<data::Batch>;
     };
-    }  // namespace data
+
+
+    template <typename T>
+    auto sample_n_items(const std::vector<T>& buffer, i32 n) -> std::vector<T>;
+
+    auto tensor_shape(Tensor tensor) -> std::string;
+
+    template <typename T>
+    auto sample_n_items_stream(std::generator<T>& stream, i32 n) -> std::generator<T> {
+        // buffer -> sample -> yield
+        std::vector<std::vector<std::string>> buffer;
+        for (auto item : stream) {
+            buffer.push_back(item);
+        }
+        auto samples = sample_n_items(buffer, n);
+        for (auto sample : samples) {
+            co_yield sample;
+        }
+    }
+
+}  // namespace data

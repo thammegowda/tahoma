@@ -10,16 +10,12 @@
 #include <torch/torch.h>
 #include <sentencepiece_processor.h>
 #include <tahoma.h>
-#include <tahoma/config.h>
 #include <tahoma/data.h>
-#include <tahoma/utils.h>
+#include <tahoma/config.h>
 
-namespace nn = torch::nn;
-namespace optim = torch::optim;
-namespace fs = std::filesystem;
+
 namespace sp = sentencepiece;
-
-
+namespace optim = torch::optim;
 using namespace tahoma;
 
 namespace tahoma::data {
@@ -130,7 +126,7 @@ namespace tahoma::data {
 
     //struct DataLoader {  // ideally, DataGenerator but it could be confusing as synthetic data generator
 
-        inline auto DataLoader::output_vocab() -> std::shared_ptr<sp::SentencePieceProcessor> {
+        auto DataLoader::output_vocab() -> std::shared_ptr<sp::SentencePieceProcessor> {
             if (vocabs.empty()) {
                 throw std::runtime_error("Vocabs vector is empty");
             }
@@ -291,8 +287,18 @@ namespace tahoma::data {
 
         auto DataLoader::get_samples(std::vector<std::string> data_paths, i32 num_samples) -> data::Batch {
             assert (num_samples > 0);
-            auto samples = tahoma::utils::sample_n_items<vector<std::string>>(read_lines(data_paths), num_samples);
-            auto examples = read_examples(std::move(samples), {}, false);
+            vector2d<std::string> buffer;
+            for (auto line : read_lines(data_paths)) {
+                buffer.push_back(line);
+            }
+            auto samples = sample_n_items<std::vector<std::string>>(buffer, num_samples);
+            auto vector_to_generator = [&samples]() -> std::generator<std::vector<std::string>> {
+                for (auto sample : samples) {
+                    co_yield sample;
+                }
+            };
+            auto samples_gen = vector_to_generator();
+            auto examples = read_examples(std::move(samples_gen), {}, false);
             auto batches = make_batches(std::move(examples), num_samples);
             for (auto batch: batches){
                 return batch; // first batch
@@ -370,5 +376,60 @@ namespace tahoma::data {
             producer_thread.join();
         }
     // }; // end of DataLoader
+
+    auto read_lines(std::string path) -> std::generator<std::string>{
+        /**
+         * Read lines from a file and yield them one by one.
+        */
+        std::ifstream file(path);
+        std::string line;
+        while(std::getline(file, line)){
+            co_yield line;
+        }
+        file.close();
+    }
+
+    template <typename T>
+    auto sample_n_items(const std::vector<T>& buffer, i32 n) -> std::vector<T>{
+        std::vector<T> samples = buffer; // copy the original vector
+        std::random_device rd;
+        std::mt19937 g(rd());
+        std::shuffle(samples.begin(), samples.end(), g);
+        // If n is greater than the size of the vector, return the whole vector
+        if (n > samples.size()) {
+            return samples;
+        }
+        samples.resize(n); // resize the vector to contain only the first n elements
+        return samples;
+    }
+
+    /*
+    template <typename T>
+    auto sample_n_items_stream(const std::generator<T>& stream, i32 n) -> std::generator<T> {
+        // buffer -> sample -> yield
+        std::vector<std::vector<std::string>> buffer;
+        for (auto item : stream) {
+            buffer.push_back(item);
+        }
+        auto samples = sample_n_items(buffer, n);
+        for (auto sample : samples) {
+            co_yield sample;
+        }
+    }
+    */
+    auto tensor_shape(Tensor tensor) -> std::string {
+        /**
+         * Return the shape of a tensor as a string.
+        */
+        std::string shape = "";
+        for (auto size : tensor.sizes()) {
+            if (shape != ""){
+                shape += ", ";
+            }
+            shape += std::to_string(size);
+        }
+        return "[" + shape + "]";
+
+    }
 
 }
