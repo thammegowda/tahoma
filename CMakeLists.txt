@@ -1,13 +1,14 @@
 cmake_minimum_required(VERSION 3.25.2 FATAL_ERROR)
 # older cmake doesnt support CUDA_STANDARD 20
 project(tahoma CXX C)
-set(CMAKE_CXX_STANDARD 23)  # cuda doesnt support c++23 yet
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# cuda does not support c++23 yet
 set (CMAKE_CUDA_STANDARD 20)
 set (CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # set options with default values
-option(USE_CCACHE "Use ccache compiler cache (https://ccache.dev)" OFF)
+option(USE_CCACHE "Use ccache compiler cache (https://ccache.dev)" ON)
 option(USE_CUDA "Use CUDA libtorch. Default is CPU only libtorch" OFF)
 option(USE_ROCM "Use ROCM libtorch. Default is CPU only libtorch" OFF)
 option(USE_PYTORCH "Use libtorch from the available pytorch installation
@@ -26,13 +27,11 @@ if(CMAKE_BUILD_TYPE MATCHES Debug)
     message(STATUS "Debug build. Flags set to retain most debug info and disable all optimizations")
 endif()
 
-
 # run git submodule update --init --recursive
 execute_process(
     COMMAND git submodule update --init --recursive --no-fetch
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
-
 
 # execute_process(
 #     COMMAND bash  ${CMAKE_SOURCE_DIR}/libs/setup.sh
@@ -54,16 +53,13 @@ if (USE_CUDA)
     set(CMAKE_CUDA_COMPILER ${CUDA_TOOLKIT_ROOT_DIR}/bin/nvcc)
 elseif (USE_ROCM)
     set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-rocm" CACHE PATH "libTorch ROCM path")
-elseif (USE_PYTORCH)
+elseif (USE_PYTORCH)  # libtorch from pytorch installation
     execute_process(
         COMMAND "${PYTHON_EXECUTABLE}" -c "import torch; print(torch.utils.cmake_prefix_path)"
         OUTPUT_VARIABLE LIBTORCH_PATH
         OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ECHO STDOUT)
-else()
-    # CPU only build by default
+else()  # CPU only build by default
     set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cpu" CACHE PATH "libTorch CPU path")
-    # debug build here
-    #set(LIBTORCH_PATH "/mnt/home/tg/work/repos/other/pytorch/libtorch-cpu" CACHE PATH "libTorch CPU path")
 endif()
 
 message(STATUS "LIBTORCH_PATH: ${LIBTORCH_PATH}")
@@ -80,15 +76,13 @@ endif()
 
 
 include_directories(
-    #"${LIBTORCH_PATH}/include/torch/csrc/api/include"
     "${LIBTORCH_PATH}/include"
     "${LIBTORCH_PATH}/include/torch/csrc/api/include"
-    #"${CMAKE_SOURCE_DIR}/libs/pytorch/torch/include/"
     "${CMAKE_SOURCE_DIR}/libs/sentencepiece/src"
     "${CMAKE_SOURCE_DIR}/libs/spdlog/include"
     "${CMAKE_SOURCE_DIR}/libs/yaml-cpp/include"
     "${CMAKE_SOURCE_DIR}/include"
-    )
+)
 
 
 ### SentencePiece library
@@ -101,7 +95,39 @@ set(EXT_LIBS ${EXT_LIBS} yaml-cpp)
 
 ###
 add_subdirectory(${CMAKE_SOURCE_DIR}/libs/backward-cpp)
-add_subdirectory(src)
+
+
+### Our code base : src
+
+set(TAHOMA_SOURCES
+    src/config.cpp
+    src/data.cpp
+    src/inference/decoder.cpp
+    src/layer/transformer.cpp
+    src/model/transformer_lm.cpp
+    src/model/transformer_nmt.cpp
+    src/train/criterion.cpp
+    src/train/loss_computer.cpp
+    src/train/stats_counter.cpp
+    src/train/trainer.cpp
+    src/train/utils.cpp
+)
+
+add_library(tahoma_lib STATIC ${TAHOMA_SOURCES})
+set_target_properties(tahoma_lib PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    OUTPUT_NAME "tahoma")
+target_link_libraries(tahoma_lib PUBLIC ${EXT_LIBS})
+target_include_directories(tahoma_lib PUBLIC "${CMAKE_SOURCE_DIR}/include")
+
+#add_executable(tahoma_exe src/buffer.cpp ${BACKWARD_ENABLE})   # use this for debugging a piece of code
+add_executable(tahoma_exe src/main.cpp ${BACKWARD_ENABLE})
+set_target_properties(tahoma_exe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+set_target_properties(tahoma_exe PROPERTIES OUTPUT_NAME "tahoma")
+target_link_libraries(tahoma_exe PUBLIC tahoma_lib)
+add_backward(tahoma_exe)   # debug info if process crashes
+
+### Tests ###
 
 if(COMPILE_TESTS)
     include(CTest)

@@ -15,14 +15,20 @@
 message(STATUS "Tests are enabled: ${BUILD_TESTING}")
 message(STATUS "CMAKE_CURRENT_SOURCE_DIR: ${CMAKE_CURRENT_SOURCE_DIR}")
 message(STATUS "CMAKE_CURRENT_BINARY_DIR: ${CMAKE_CURRENT_BINARY_DIR}")
+message(STATUS "CMAKE_SOURCE_DIR: ${CMAKE_SOURCE_DIR}")
+
+
 get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
+
+
 foreach(dir ${dirs})
     message(STATUS "    Include directory: ${dir}")
 endforeach()
 
 
-add_executable(test_data_loader test_data_loader.cpp)
-# target_link_libraries(test_data_loader data_loader)
+add_executable(test_data_loader test_data_loader.cpp ${BACKWARD_ENABLE})
+target_link_libraries(test_data_loader PRIVATE tahoma_lib)
+add_backward(test_data_loader)
 
 add_test(NAME test_data_loader
-         COMMAND test_data_loader "arg1" "arg2")
+         COMMAND test_data_loader ${CMAKE_SOURCE_DIR}/examples/transformer-nmt.yaml)
