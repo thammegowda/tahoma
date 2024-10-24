@@ -67,14 +67,14 @@ namespace tahoma::data {
 
         auto output_vocab() -> std::shared_ptr<sentencepiece::SentencePieceProcessor>;
         auto read_lines(std::vector<std::string> data_paths) -> std::generator<std::vector<std::string>>;
-        auto read_examples(std::generator<std::vector<std::string>> rows, std::vector<size_t> max_length, bool max_length_crop=true) -> std::generator<data::Example>;
+        auto read_examples(std::generator<std::vector<std::string>> rows, std::vector<size_t> max_length, bool max_length_crop=true, i32 num_threads=1) -> std::generator<data::Example>;
         auto buffered_shuffle(std::generator<data::Example> examples, size_t buffer_size) -> std::generator<data::Example>;
         auto make_batches(std::generator<data::Example> examples, size_t batch_size, bool contiguous = false) -> std::generator<data::Batch>;
         auto get_train_data(size_t n_data_threads=1) -> std::generator<data::Batch>;
         auto get_validation_data() -> std::generator<data::Batch>;
         auto get_samples(std::vector<std::string> data_paths, i32 num_samples) -> data::Batch;
         auto get_data_sync(std::string dataset_name, std::string fallback_name="trainer") -> std::generator<data::Batch>;
-        auto get_data_async(std::string dataset_name) -> std::generator<data::Batch>;
+        auto get_data_async(std::string dataset_name, i32 num_threads) -> std::generator<data::Batch>;
     };
 
 

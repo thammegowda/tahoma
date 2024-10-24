@@ -5,6 +5,7 @@
 #include <thread>
 #include <random>
 #include <condition_variable>
+#include <queue>
 
 #include <__generator.hpp>  //reference implementation of generator
 #include <torch/torch.h>
@@ -112,7 +113,8 @@ namespace tahoma::data {
             spdlog::debug("loading vocab {}", vocab_path);
             auto spp = std::make_shared<sp::SentencePieceProcessor>();
             if (!fs::exists(vocab_path)) {
-                spdlog::error("Vocab file {} not found", vocab_path);
+                spdlog::error("Vocab file {} not found. Current dir: {}",
+                    vocab_path, fs::current_path().string());
                 throw std::runtime_error("Vocab file " + vocab_path + " not found");
             }
             if (!spp->Load(vocab_path).ok()) {
@@ -174,8 +176,10 @@ namespace tahoma::data {
             spdlog::debug("Reached the end of data files");
         }
 
-        auto DataLoader::read_examples(std::generator<vector<std::string>> rows, vector<size_t> max_length,
-                bool max_length_crop) -> std::generator<data::Example> {
+        auto DataLoader::read_examples(std::generator<std::vector<std::string>> rows, std::vector<size_t> max_length,
+                bool max_length_crop, int num_threads) -> std::generator<data::Example> {
+            // 1.producer => n.workers =>main.consumer
+
             i32 num_fields = -1;
             i64 rec_num = 0;
             vector<i32> eos_ids = {};
@@ -184,38 +188,119 @@ namespace tahoma::data {
                 eos_ids.push_back(vocab->eos_id());
             }
 
-            for (auto fields: rows) {
-                if (num_fields < 0) {
-                    num_fields = fields.size(); // initialize on first run
-                    if (max_length_crop){
-                        if(max_length.size() != num_fields) {
-                            throw std::runtime_error("max_length must be of the same size as data_paths");
+            std::queue<std::tuple<i64, std::vector<std::string>>> inp_queue;
+            std::queue<std::tuple<i64, data::Example>> out_queue;
+
+            std::mutex mutex;
+            std::condition_variable cv;
+            bool producer_done = false;
+            i32 num_active_workers = 0;
+
+            auto producer = std::thread([&](){
+                i64 rec_num = 0;
+                for (auto fields: rows) {
+                    if (num_fields < 0) {
+                        num_fields = fields.size(); // initialize on first run
+                        if (max_length_crop){
+                            if(max_length.size() != num_fields) {
+                                throw std::runtime_error("max_length must be of the same size as data_paths");
+                            }
+                            spdlog::debug("Length cropping is enabled. max_length: {}", fmt::join(max_length, ", "));
                         }
-                        spdlog::debug("Length cropping is enabled. max_length: {}", fmt::join(max_length, ", "));
+                    }
+                    if (fields.size() != num_fields) {
+                        spdlog::warn("All data files must have the same number of fields. \
+                            Record number {} has {} fields, expected {}", rec_num, fields.size(), num_fields);
+                        continue;
+                    }
+                    {
+                        std::unique_lock<std::mutex> lock(mutex);
+                        inp_queue.push(std::make_tuple(rec_num, fields));
+                        cv.notify_one();
+                    }
+                    rec_num++;
+                }
+                {
+                    std::unique_lock<std::mutex> lock(mutex);
+                    producer_done = true;
+                    cv.notify_all();
+                }
+            });
+            auto work = [&](){
+                while (true) {
+                    std::tuple<i64, std::vector<std::string>> item;
+                    {
+                        std::unique_lock<std::mutex> lock(mutex);
+                        if (inp_queue.empty()){
+                            if (producer_done) {
+                                break;
+                            }
+                            continue;
+                        }
+                        item = inp_queue.front();
+                        inp_queue.pop();
+                    }
+                    auto [rec_num, fields] = item;
+                    bool skip = false;
+                    auto field_ids = vector2d<int32_t>(num_fields);
+                    for (size_t i = 0; i < num_fields; ++i) {
+                        auto ids = vocabs[i]->EncodeAsIds(fields[i]);
+                        ids.push_back(eos_ids[i]);  // append token id
+                        if (max_length_crop && ids.size() > max_length[i]) {
+                            ids = vector<int32_t>(ids.begin(), ids.begin() + max_length[i]);
+                        }
+                        skip = skip || ids.empty();
+                        field_ids[i] = ids;
+                    }
+                    if (skip) {
+                        spdlog::warn("Skipping empty record {}", rec_num);
+                        continue;
+                    }
+                    {
+                        std::unique_lock<std::mutex> lock(mutex);
+                        out_queue.push(std::make_tuple(rec_num, data::Example(rec_num, fields, field_ids)));
+                        cv.notify_one();
                     }
                 }
-                if (fields.size() != num_fields) {
-                    throw std::runtime_error(fmt::format("All data files must have the same number of fields. \
-                        Record number {} has {} fields, expected {}", rec_num, fields.size(), num_fields));
+                {
+                    std::unique_lock<std::mutex> lock(mutex);
+                    --num_active_workers;
                 }
-                bool skip = false;
-                auto field_ids = vector2d<int32_t>(num_fields);
-                 for (size_t i = 0; i < num_fields; ++i) {
-                    auto ids = vocabs[i]->EncodeAsIds(fields[i]);
-                    ids.push_back(eos_ids[i]);  //  append token id
-                    if (max_length_crop && ids.size() > max_length[i]) {
-                        ids = vector<int32_t>(ids.begin(), ids.begin() + max_length[i]);
-                    }
-                    skip = skip || ids.empty();
-                    field_ids[i] = ids;
+            };
+
+            std::vector<std::thread> workers;
+            for (int i = 0; i < num_threads; ++i) {
+                workers.emplace_back(work);
+                {
+                    std::unique_lock<std::mutex> lock(mutex);
+                    ++num_active_workers;
                 }
-                if (skip) {
-                    spdlog::warn("Skipping empty record {}", rec_num);
-                    continue;
-                }
-                co_yield data::Example(rec_num, fields, field_ids);
-                rec_num++;
             }
+
+            // detach threads; generator might stop reading anytime
+            producer.detach();
+            for (auto& worker : workers) {
+                worker.detach();
+            }
+
+            // consumer
+            while (true) {
+                std::unique_lock<std::mutex> lock(mutex);
+                cv.wait(lock, [&] { return !out_queue.empty() || producer_done; });
+                if (out_queue.empty() && producer_done && num_active_workers == 0) {
+                    break;
+                }
+                auto item = out_queue.front();
+                out_queue.pop();
+                lock.unlock();
+                cv.notify_one();
+                co_yield std::get<1>(item);
+            }
+
+            //producer.join();
+            //for (auto& worker : workers) {
+             //   worker.join();
+            //}
         }
 
         /**
@@ -226,18 +311,23 @@ namespace tahoma::data {
         */
         auto DataLoader::buffered_shuffle(std::generator<data::Example> examples, size_t buffer_size) -> std::generator<data::Example> {
             vector<data::Example> buffer;
+            std::vector<int32_t> indices(buffer_size);
+            std::iota(indices.begin(), indices.end(), 0);
+            auto rng = std::default_random_engine {};
+
             for (auto ex : examples) {
                 buffer.push_back(ex);
                 if (buffer.size() >= buffer_size) {
-                    std::shuffle(buffer.begin(), buffer.end(), std::mt19937(std::random_device()()));
-                    for (auto ex : buffer) {
-                        co_yield ex;
+                    std::shuffle(indices.begin(), indices.end(), rng);
+                    for (auto idx : indices) {
+                        co_yield buffer[idx];
                     }
                     buffer.clear();
                 }
             }
+            // the last buffer maybe not full to buffer_size
             if (!buffer.empty()) {
-                std::shuffle(buffer.begin(), buffer.end(), std::mt19937(std::random_device()()));
+                std::shuffle(buffer.begin(), buffer.end(), rng);
                 for (auto ex : buffer) {
                     co_yield ex;
                 }
@@ -272,7 +362,7 @@ namespace tahoma::data {
             if (n_data_threads >= 1) { // asynchronous, on a separate thread
                 spdlog::debug("Using async loader with {} data threads", n_data_threads);
                 // TODO: support multiple threads
-                return get_data_async("trainer");
+                return get_data_async("trainer", n_data_threads);
             } else if (n_data_threads == 0) { // synchronous, on the same thread
                 spdlog::debug("Data loading on the main thread");
                 return get_data_sync("trainer");
@@ -321,7 +411,7 @@ namespace tahoma::data {
             return batches;
         }
 
-        auto DataLoader::get_data_async(std::string dataset_name) -> std::generator<data::Batch> {
+        auto DataLoader::get_data_async(std::string dataset_name, i32 num_threads) -> std::generator<data::Batch> {
 
             auto data_paths = this->config[dataset_name]["data"].as<std::vector<std::string>>();
             auto mini_batch = this->config[dataset_name]["mini_batch"].as<i32>();
@@ -333,23 +423,19 @@ namespace tahoma::data {
             std::condition_variable cv;
             bool producer_done = false;
             std::queue<data::Batch> queue;
-            size_t max_queue_size = 24;
-            size_t thread_sleep_ms = 4;  // in ms
+            size_t max_queue_size = 128;
+            //size_t thread_sleep_ms = 4;  // in ms
 
             std::thread producer_thread([&] {
-                auto lines = read_lines(data_paths);
-                auto examples = read_examples(std::move(lines), max_length, max_length_crop);
+                auto examples = read_examples(read_lines(data_paths), max_length, max_length_crop, num_threads);
                 examples = buffered_shuffle(std::move(examples), mini_batch * maxi_batch);
                 auto batches = make_batches(std::move(examples), mini_batch);
                 for (auto batch : batches) {
-                    while (queue.size() >= max_queue_size) {
-                        // wait for the queue to drain
-                        std::this_thread::sleep_for(std::chrono::milliseconds(thread_sleep_ms));
-                    }
-                    {
-                        std::unique_lock<std::mutex> lock(mutex);
-                        queue.push(batch);
-                    }
+
+                    std::unique_lock<std::mutex> lock(mutex);
+                    cv.wait(lock, [&] { return queue.size() < max_queue_size; });
+                    queue.push(batch);
+                    lock.unlock();
                     cv.notify_one();
                 }
                 // notify consumers that we are done
@@ -358,8 +444,10 @@ namespace tahoma::data {
                     producer_done = true;
                 }
             });
-
-            // producer_thread.detach();
+            // NOTE: generator might stop reading anytime which result in thread termination
+            // if you terminate a thread without join or detach, you get "terminate called without an active exception"
+            // and the program crashes. So we detach the thread as we don't need to join it.
+            producer_thread.detach();
             // read from queue and co_yield
             while (true) {
                 std::unique_lock<std::mutex> lock(mutex);
@@ -373,7 +461,7 @@ namespace tahoma::data {
                 //batch.contiguous();
                 co_yield batch;
             }
-            producer_thread.join();
+            //producer_thread.join();
         }
     // }; // end of DataLoader
 
@@ -403,20 +491,6 @@ namespace tahoma::data {
         return samples;
     }
 
-    /*
-    template <typename T>
-    auto sample_n_items_stream(const std::generator<T>& stream, i32 n) -> std::generator<T> {
-        // buffer -> sample -> yield
-        std::vector<std::vector<std::string>> buffer;
-        for (auto item : stream) {
-            buffer.push_back(item);
-        }
-        auto samples = sample_n_items(buffer, n);
-        for (auto sample : samples) {
-            co_yield sample;
-        }
-    }
-    */
     auto tensor_shape(Tensor tensor) -> std::string {
         /**
          * Return the shape of a tensor as a string.
@@ -431,5 +505,4 @@ namespace tahoma::data {
         return "[" + shape + "]";
 
     }
-
-}
+}  // namespace data

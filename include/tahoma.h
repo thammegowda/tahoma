@@ -12,36 +12,16 @@
 #include <map>
 #include <optional>
 
-#include "__generator.hpp"
-
+#include <__generator.hpp>
 #include <spdlog/spdlog.h>
 #include <spdlog/fmt/bundled/format.h>
+#include <spdlog/fmt/std.h>
 #include <torch/torch.h>
 #include <yaml-cpp/yaml.h>
 #include <sentencepiece_processor.h>
 
 
 #define assertm(exp, msg) assert(((void)msg, exp))
-
-// define macro for aliasing std::shared_ptr<T> as Ptr<T>
-//#define Ptr std::shared_ptr
-//#define New std::make_shared
-
-
-/// @brief formatter for filesystem:path to work with spdlog
-// https://stackoverflow.com/a/69496952/1506477
-
-template<>
-struct fmt::formatter<std::filesystem::path> {
-    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
-        return ctx.end();
-    }
-
-    template <typename FormatContext>
-    auto format(const std::filesystem::path& input, FormatContext& ctx) -> decltype(ctx.out()) {
-        return format_to(ctx.out(), "{}", std::string(input));
-    }
-};
 
 
 namespace tahoma {
@@ -75,15 +55,12 @@ namespace tahoma {
     //auto k_device = torch::device(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
 
     /*
-    template<typename T>
-    using ptr = std::shared_ptr<T>;
-
-    template<typename T>
-    using u_ptr = std::unique_ptr<T>;
-
-    template<typename T>
-    using w_ptr = std::weak_ptr;
+    template<typename T> using Ptr = std::shared_ptr<T>;
+    template<typename T> using New = std::make_shared<T>;
+    template<typename T> using Ptru = std::unique_ptr<T>;
+    template<typename T> using Ptrw = std::weak_ptr;
     */
+
     inline int global_setup() {
         spdlog::info("Global setup started");
         spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [t%t] [%^%l%$] %v");
@@ -103,4 +80,17 @@ namespace tahoma {
     };
 
 
+    /*
+    template <typename T>
+    class IteratorBase {
+        public:
+            virtual bool has_next() = 0;
+            virtual T next() = 0;
+            virtual ~Iterator() = default;
+
+    };
+
+    template <typename T>
+    using Iterator = Ptr<IteratorBase<T>>;
+    */
 } // namespace tahoma

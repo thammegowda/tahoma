@@ -73,11 +73,14 @@ namespace tahoma::train {
             return step_num > 0 ? tot_loss / step_num : 0.0;
         }
 
-        auto StatsCounter::update(float loss, size_t num_sents, size_t num_tokens, f32 lr, size_t num_steps) -> StatsCounter& {
+        auto StatsCounter::update(f32 loss, size_t num_sents, size_t num_tokens, f32 lr, size_t num_steps) -> StatsCounter& {
             tot_sents += num_sents;
             tot_tokens += num_tokens;
             step_num += num_steps;
             tot_loss += loss;
+            cur_loss = loss;
+            cur_lr = lr;
+
             bool log_now = false;
             if (log_first > 0 && step_num <= log_first) {
                 log_now = true;
@@ -96,13 +99,17 @@ namespace tahoma::train {
                 last_log_time = chrono::high_resolution_clock::now();
             }
             if (log_now) {
-                auto duration_ms = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start_time);
-                auto toks_rate = 1000.0f * tot_tokens / duration_ms.count();
-                auto sents_rate = 1000.0f * tot_sents / duration_ms.count();
-                spdlog::info("{} Step: {}; Loss: {:.5f}; AvgLoss: {:.5f}; sents: {}; toks: {}, speed: {:.1f} tok/s {:.1f} sent/s LR: {:.5f}",
-                    name, step_num, loss, avg_loss(), tot_sents, tot_tokens, toks_rate, sents_rate, lr);
+                auto msg = current_log_message();
+                spdlog::info(msg);
             }
             return *this;
+        }
+        auto StatsCounter::current_log_message() -> string {
+            auto duration_ms = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start_time);
+            auto toks_rate = 1000.0f * tot_tokens / duration_ms.count();
+            auto sents_rate = 1000.0f * tot_sents / duration_ms.count();
+            return fmt::format("{} Step: {}; Loss: {:.5f}; AvgLoss: {:.5f}; sents: {}; toks: {}, speed: {:.1f} tok/s {:.1f} sent/s LR: {:.5f}",
+                name, step_num, cur_loss, avg_loss(), tot_sents, tot_tokens, toks_rate, sents_rate, cur_lr);
         }
 
 }
