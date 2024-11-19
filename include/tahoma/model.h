@@ -1,0 +1,32 @@
+
+#pragma once
+
+#include <torch/torch.h>
+#include <tahoma.h>
+
+using namespace tahoma;
+
+namespace tahoma::model {
+
+    struct IModel: public nn::Module {
+            IModel() = default;
+            ~IModel() = default;
+            virtual TaskType task_type() = 0;
+            // virtual functions and templates dont mix. so we use std::any for the return type
+            virtual Pack forward(Pack& args) = 0;
+        };
+
+
+    struct LanguageModel: public IModel {
+        size_t vocab_size;
+        size_t model_dim;
+        nn::Linear lm_head;
+
+        LanguageModel(size_t model_dim, size_t vocab_size):
+            model_dim { model_dim },
+            vocab_size { vocab_size },
+            lm_head { register_module("lm_head", nn::Linear(nn::LinearOptions(model_dim, vocab_size))) }
+        {}
+    };
+
+}

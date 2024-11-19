@@ -1,0 +1,75 @@
+model:
+  name: transformer_nmt
+  args:
+    src_vocab_size: 8000
+    tgt_vocab_size: 8000
+    encoder_layers: 6
+    decoder_layers: 3
+    model_dim: 512
+    attn_heads: 8
+    ffn_dim: 2048
+    dropout: 0.1
+
+optimizer:
+  name: adam
+  args:
+    betas:
+      - 0.9
+      - 0.98
+    eps: 1e-9
+    weight_decay: 0.0005
+
+scheduler:
+  name: noam
+  args:
+    warmup_steps: 8000
+    model_dim: 512
+    constant: 2
+
+schema:
+  fields:
+    - sequence
+    - sequence
+  vocabs:
+    - data/eng-kan/vocab.joint.8k.model
+    - data/eng-kan/vocab.joint.8k.model
+  shared_vocabs: true
+
+trainer:
+  data:
+    - data/eng-kan/train.kan
+    - data/eng-kan/train.eng
+  mini_batch: 32
+  maxi_batch: 10
+  epochs: 100000
+  max_length: &max_length
+    - 128
+    - 128
+  max_length_crop: true
+  fp16: true
+  chunk_size: 8
+  data_threads: 8
+  log_frequency: 50u
+  #log_frequency: 1u
+  log_first: 5
+
+  criterion:
+    name: kl_divergence
+    args:
+      num_labels : 8000
+      label_smooth_rate: 0.1
+
+validator:
+  frequency: 500
+  data:
+    - data/eng-kan/dev.kan
+    - data/eng-kan/dev.eng
+  batch_size: 8
+  criteria:
+    - name: cross_entropy
+      args:
+        label_smooth_rate: 0.0
+
+checkpoint:
+  frequency: 100000
+  keep: 10

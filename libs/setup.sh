@@ -3,9 +3,9 @@ set -euo pipefail
 MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 # versions
-LIBTORCH_VERSION=2.1.0
-CUDA_VERSION=cu121
-ROCM_VERSION=rocm5.6
+LIBTORCH_VERSION=2.4.1
+CUDA_VERSION=cu124
+ROCM_VERSION=rocm6.1
 DEBUG=0
 
 libtorch_base="https://download.pytorch.org/libtorch"
@@ -36,7 +36,7 @@ download() {
     unzip $name.zip -d $name \
         && mv $name/libtorch/* $name/ \
         && rm -rf $name/libtorch
-    
+
     # reverse engineered from libtorch build script
     # https://github.com/pytorch/builder/blob/6f3530cd/manywheel/build_libtorch.sh#L193
     CRC32=$(objcopy --dump-section .gnu_debuglink=>(tail -c4 | od -t x4 -An | xargs echo) $name/lib/libtorch_cpu.so)
@@ -55,15 +55,27 @@ download() {
 main() {
     set -euo pipefail
     cd $MYDIR
+    if [ $# -eq 0 ]; then
+        selected_tasks=(cpu cuda)
+    else
+        selected_tasks=("$@")
+    fi
     for tool in wget unzip; do
         if ! command -v $tool &> /dev/null; then
             echo "$tool could not be found. Please install and rerun."
             exit 2
         fi
     done
-    download libtorch-cpu "$cpu_url"
-    download libtorch-$CUDA_VERSION "$cuda_url"
-    #download libtorch-$ROCM_VERSION "$rocm_url"
+
+    for task in ${selected_tasks[@]}; do
+        case $task in
+            cpu) download libtorch-cpu "$cpu_url" ;;
+            cuda) download libtorch-$CUDA_VERSION "$cuda_url" ;;
+            rocm) download libtorch-$ROCM_VERSION "$rocm_url" ;;
+            *) echo "ERROR: Unknown task: $task. Supported cpu cuda rocm" ;;
+        esac
+    done
+    echo "Done."
 }
 
 main "$@"

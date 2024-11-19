@@ -3,7 +3,7 @@
 		{
 			"type": "shell",
 			"label": "build-full",
-			"command": "cmake . -Bbuild-debug -DUSE_CUDA=on && cmake -B build-debug -j",
+			"command": "cmake . -Bbuild-debug -DUSE_CUDA=on && cmake --build build-debug -j",
 			"problemMatcher": [
 				"$gcc"
 			],
