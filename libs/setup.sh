@@ -29,11 +29,11 @@ download() {
         echo "$name already exists"
     else
         rm -f $name.zip $name.zip._OK
-        wget -O $name.zip "${url}" && touch $name.zip._OK
+        wget -q --show-progress -O $name.zip "${url}" && touch $name.zip._OK
     fi
 
     rm -rf $name  # remove incomplete downloads
-    unzip $name.zip -d $name \
+    unzip -q $name.zip -d $name \
         && mv $name/libtorch/* $name/ \
         && rm -rf $name/libtorch
 
@@ -45,8 +45,8 @@ download() {
     # check if _OK file exists, else download
     if [[ $DEBUG -eq 1 && ! -f $name-debug.zip._OK ]]; then
         rm -f $name-debug.zip $name-debug.zip._OK
-        wget -O $name-debug.zip "$DEBUG_URL" \
-            && unzip -j $name-debug.zip -d $name/lib/ \
+        wget -q --show-progress -O $name-debug.zip "$DEBUG_URL" \
+            && unzip -q -j $name-debug.zip -d $name/lib/ \
             && touch $name-debug.zip._OK
     fi
     touch $flag

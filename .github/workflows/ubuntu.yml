@@ -24,6 +24,7 @@ jobs:
 
     - name: Setup
       run: |
+        sudo apt-get update -y && sudo apt-get install -y gcc-12 g++-12 cmake build-essential pkg-config libgoogle-perftools-dev libdw-dev libunwind-dev
         bash ${{github.workspace}}/libs/setup.sh cpu
         python -m pip install --upgrade pip && python -m pip install mtdata==0.4.2
         export PATH=$PATH:$HOME/.local/bin
@@ -32,7 +33,7 @@ jobs:
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCOMPILE_TESTS=on
 
     - name: Build
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -j
 
     - name: GetTestData
       run: |
