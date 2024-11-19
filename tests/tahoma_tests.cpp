@@ -1,7 +1,7 @@
-
 #include <iostream>
 
-#include "test_data_loader.hpp"
+#define BACKWARD_HAS_DW 1
+#include "test_data_loader.cpp"
 using namespace tahoma::tests;
 
 using TestFunc = std::function<int(std::vector<std::string>)>;
@@ -14,7 +14,8 @@ struct TestMeta {
     std::string help;
 
     TestMeta(TestFunc func, std::string name, int nargs, const std::string description, const std::string help = "")
-        : func(func), name(name), nargs(nargs), description(description), help(help) {}
+        : func(func), name(name), nargs(nargs), description(description), help(help) {
+    }
 
     TestMeta() = default;
     TestMeta(const TestMeta&) = default;
@@ -41,7 +42,7 @@ struct TestMeta {
 
 void usage(const std::string& program_name, const std::vector<TestMeta>& index) {
     std::cerr << "Usage: " << program_name << " <test_name> <args...>\nAvailable tests:\n";
-    for (const auto&  meta : index) {
+    for (const auto& meta : index) {
         std::cerr << meta << "\n";
     }
 }
@@ -55,6 +56,7 @@ int main(int argc, char const* argv[]) {
         TestMeta(test_config_parse, "config_parse", 1, "Parse a config file", "Args: <config_file>"),
         TestMeta(test_read_lines, "read_lines", 1, "Read lines from a file", "Args: <config_file>"),
         TestMeta(test_read_examples, "read_examples", 1, "Read examples from a file", "Args: <config_file>"),
+        TestMeta(test_make_batches, "make_batches", 1, "Read examples from a file", "Args: <config_file>"),
         TestMeta(test_data_loader_sync, "data_loader_sync", 1, "Load data from a config file", "Args: <config_file>"),
         TestMeta(test_data_loader_async, "data_loader_async", 1, "Load data from a config file", "Args: <config_file>"),
         TestMeta(test_samples, "samples", 1, "Load samples from a config file", "Args: <config_file>"),

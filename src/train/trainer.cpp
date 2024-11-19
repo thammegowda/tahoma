@@ -5,7 +5,6 @@
 #include <sentencepiece_processor.h>
 
 #include <tahoma.h>
-#include <tahoma/config.h>
 #include <tahoma/data.h>
 #include <tahoma/model.h>
 #include <tahoma/model/transformer_nmt.h>

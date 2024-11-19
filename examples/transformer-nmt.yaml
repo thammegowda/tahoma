@@ -40,7 +40,7 @@ trainer:
     - data/eng-kan/train.kan
     - data/eng-kan/train.eng
   mini_batch: 32
-  maxi_batch: 1000
+  maxi_batch: 10
   epochs: 100000
   max_length: &max_length
     - 128

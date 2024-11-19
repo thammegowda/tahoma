@@ -1,12 +1,12 @@
 build*
 libs/libtorch*
-data/
-!data/*.sh
 
 .history*
 **.zip
 **.so
 runs/*
 .ipynb_checkpoints
+
+/data/
 
 .vscode/settings.json

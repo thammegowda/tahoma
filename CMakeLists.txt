@@ -82,6 +82,7 @@ include_directories(
     "${CMAKE_SOURCE_DIR}/libs/spdlog/include"
     "${CMAKE_SOURCE_DIR}/libs/yaml-cpp/include"
     "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/libs/backward-cpp"
 )
 
 
@@ -120,16 +121,14 @@ set_target_properties(tahoma_lib PROPERTIES
 target_link_libraries(tahoma_lib PUBLIC ${EXT_LIBS})
 target_include_directories(tahoma_lib PUBLIC "${CMAKE_SOURCE_DIR}/include")
 
-#add_executable(tahoma_exe src/buffer.cpp ${BACKWARD_ENABLE})   # use this for debugging a piece of code
-add_executable(tahoma_exe src/main.cpp ${BACKWARD_ENABLE})
+
+add_executable(tahoma_exe src/main.cpp)
 set_target_properties(tahoma_exe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set_target_properties(tahoma_exe PROPERTIES OUTPUT_NAME "tahoma")
-target_link_libraries(tahoma_exe PUBLIC tahoma_lib)
-add_backward(tahoma_exe)   # debug info if process crashes
+target_link_libraries(tahoma_exe PUBLIC tahoma_lib Backward::Interface)
 
 ### Tests ###
 
 if(COMPILE_TESTS)
-    include(CTest)
     add_subdirectory(tests)
 endif()

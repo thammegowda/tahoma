@@ -6,7 +6,6 @@
 #include <tahoma/train/utils.h>
 #include <tahoma/model.h>
 #include <tahoma/data.h>
-#include <tahoma/config.h>
 
 
 

@@ -2,7 +2,6 @@
 #include <coroutine>
 #include <ranges>
 #include <memory>
-#include <__generator.hpp>  //reference implementation of generator
 
 #include <torch/torch.h>
 #include <sentencepiece_processor.h>

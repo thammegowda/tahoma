@@ -1,13 +1,21 @@
 
 #pragma once
 #include <tahoma.h>
-#include <tahoma/config.h>
+#include <sentencepiece_processor.h>
 
 using namespace tahoma;
 
 namespace tahoma::data {
 
-    auto read_lines(std::string path) -> std::generator<std::string>;
+    auto read_lines(std::string path) -> Generator<std::string>;
+    auto read_lines(std::vector<std::string> data_paths) -> Generator<std::vector<std::string>>;
+
+    template <typename T>
+    auto vector_to_generator(const std::vector<T>& vec) -> Generator<T> {
+        for (const auto& item : vec) {
+            co_yield item;
+        }
+    }
 
     struct Example {
         i64 id;
@@ -32,7 +40,7 @@ namespace tahoma::data {
 
         // move ctr
         Example(Example&& other) noexcept :
-            id(other.id), fields(other.fields), field_ids(other.field_ids) {}
+            id(other.id), fields(std::move(other.fields)), field_ids(std::move(other.field_ids)) {}
 
         //std::ostream& operator<<(std::ostream& os, const Example& example);
 
@@ -66,15 +74,19 @@ namespace tahoma::data {
         ~DataLoader() = default;
 
         auto output_vocab() -> std::shared_ptr<sentencepiece::SentencePieceProcessor>;
-        auto read_lines(std::vector<std::string> data_paths) -> std::generator<std::vector<std::string>>;
-        auto read_examples(std::generator<std::vector<std::string>> rows, std::vector<size_t> max_length, bool max_length_crop=true, i32 num_threads=1) -> std::generator<data::Example>;
-        auto buffered_shuffle(std::generator<data::Example> examples, size_t buffer_size) -> std::generator<data::Example>;
-        auto make_batches(std::generator<data::Example> examples, size_t batch_size, bool contiguous = false) -> std::generator<data::Batch>;
-        auto get_train_data(size_t n_data_threads=1) -> std::generator<data::Batch>;
-        auto get_validation_data() -> std::generator<data::Batch>;
+        auto make_example(std::vector<std::string> fields, vector<i32> eos_ids, std::vector<size_t> max_lengths, bool max_length_crop=true) -> data::Example;
+        auto read_examples(Generator<std::vector<std::string>> rows, std::vector<size_t> max_lengths, bool max_length_crop=true) -> Generator<data::Example>;
+        auto read_examples(std::vector<std::string> data_paths, std::vector<size_t> max_lengths, bool max_length_crop=true, i32 num_threads=1) -> Generator<data::Example>;
+
+        //template <typename T>
+        auto buffered_shuffle(Generator<data::Example>& examples, size_t buffer_size) -> Generator<data::Example>;
+        auto make_batches(Generator<data::Example>& examples, size_t batch_size, bool contiguous = false) -> Generator<data::Batch>;
+        auto get_train_data(size_t n_data_threads=1) -> Generator<data::Batch>;
+        auto get_validation_data() -> Generator<data::Batch>;
         auto get_samples(std::vector<std::string> data_paths, i32 num_samples) -> data::Batch;
-        auto get_data_sync(std::string dataset_name, std::string fallback_name="trainer") -> std::generator<data::Batch>;
-        auto get_data_async(std::string dataset_name, i32 num_threads) -> std::generator<data::Batch>;
+        auto get_data_sync(std::string dataset_name, std::string fallback_name="trainer") -> Generator<data::Batch>;
+        auto get_data_async(std::string dataset_name, i32 num_threads) -> Generator<data::Batch>;
+        auto get_data_async_new(std::string dataset_name, i32 num_threads) -> Generator<data::Batch>;
     };
 
 
@@ -84,7 +96,7 @@ namespace tahoma::data {
     auto tensor_shape(Tensor tensor) -> std::string;
 
     template <typename T>
-    auto sample_n_items_stream(std::generator<T>& stream, i32 n) -> std::generator<T> {
+    auto sample_n_items_stream(Generator<T>& stream, i32 n) -> Generator<T> {
         // buffer -> sample -> yield
         std::vector<std::vector<std::string>> buffer;
         for (auto item : stream) {

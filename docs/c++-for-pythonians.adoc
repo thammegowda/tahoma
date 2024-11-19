@@ -1,0 +1,22 @@
+
+# C++ for Pythonians
+
+CPP is hard, but worth it. CPP is a compiled language. It is a statically typed language, which means that the type of a variable is known at compile time. This makes it faster than Python, which is an interpreted language.
+CPP is older than Python and evolved over time. In addition, some features are compatible with even older versions of C. This makes it a very powerful language, but also a bit more complex to learn.
+If you thought Python 2 -> 3 was a mess, wait until you see C++98 -> C++11 -> C++14 -> C++17 -> C++20 -> C++23 -> C++26.
+The language has evolved a lot over the years, and the latest versions have a lot of features that make it easier to write code.
+At the time of writing, C++23 seems to be the latest, stable-enough version. C++26 is in the works, but it will take some time before it is widely adopted.
+
+
+1. Learn new C++ (e.g. C++23) features. Forget the old ways when you can.
+1. Dont collide namespaces. Use `using namespace std;` only in small programs. For larger programs, use `std::` prefix instead of colliding namespaces.
+1. Use `auto` keyword to let the compiler deduce the type of the variable. This makes the code more readable and less error-prone
+1. Use `nullptr` instead of `NULL` or `0`. `nullptr` is a pointer literal that can be converted to any pointer type.
+1. Use modern memory management techniques like `std::unique_ptr`, `std::shared_ptr`, and `std::weak_ptr` instead of raw pointers.
+1. Use `std::generator` instead of raw iterators. Beware, you cannot create a generator on one thread and use it from another thread. Create and use it on the same thread whenever possible.
+1. Learn about lvalue and rvalue.
+1. Careful while reusing variable names. Sometimes, it can lead to unexpected results. Example, the caller of one function may have bound the variable name to a reference, and the callee may change the reference to point to a different object.
+1. Dont put functional code in assert statements. They may be removed in release builds.
+  It maybe okay  `assert do_work() == STATUS_OK, "Work Failed"` in python, but not in C++.
+
+

@@ -1,15 +1,25 @@
 #!/usr/env/bin bash
+# Download sample datasets and create SentencePiece models
+
+# Created by Thamme "TG" Gowda, circa 2024-10
 set -eux
 
 mydir=$(dirname $0)
-root=$(realpath $mydir/../..)
+root=$(realpath $mydir/..)
+data_dir=$root/data
 
 # Download the data
 tools=(mtdata spm_train)
 # have mtdata 0.4.2 or higher. older version had a bug in echo
 
 # add spm_train to path
-export PATH=$PATH:$root/build/libs/sentencepiece/src
+spm_build_path=$root/build/libs/sentencepiece/src
+[[ -d $spm_build_path ]] || {
+    echo "Missing $spm_build_path; Please build the project first. "
+    exit 1
+}
+
+export PATH=$spm_build_path:$PATH
 
 SPM_ARGS="--pad_id=0 --bos_id=1 --eos_id=2 --unk_id=3 --character_coverage=0.9995 --byte_fallback"
 
@@ -21,29 +31,31 @@ for tool in ${tools[@]}; do
 done
 
 
-non-empty-tsv(){
-    awk -F'\t' '{
-        all_non_empty = 1
+clean-segs(){
+    sed 's/\r//g' \
+    | awk -F'\t' '{
+        all_ok = 1
         for (i = 1; i <= NF; i++) {
             if ($i == "") {
-                all_non_empty = 0
+                all_ok = 0
                 break
             }
         }
-        if (all_non_empty) {
+        if (all_ok) {
             print
         }
     }'
 }
 
 #### English-Kannada ####
-out_dir=$mydir/eng-kan
+
+out_dir=$data_dir/eng-kan
 mkdir -p $out_dir
 [[ -f $out_dir/._OK ]] || {
     # mtdata echo Statmt-pmindia-1-eng-kan | awk 'NF>0' > $out_dir/train.eng-kan.tsv
-    mtdata echo AI4Bharath-samananthar-0.2-eng-kan | non-empty-tsv > $out_dir/train.eng-kan.tsv
-    mtdata echo Flores-flores200_dev-1-eng-kan | non-empty-tsv > $out_dir/dev.eng-kan.tsv
-    mtdata echo Flores-flores200_devtest-1-eng-kan | non-empty-tsv > $out_dir/test.eng-kan.tsv
+    mtdata echo AI4Bharath-samananthar-0.2-eng-kan | clean-segs > $out_dir/train.eng-kan.tsv
+    mtdata echo Flores-flores200_dev-1-eng-kan | clean-segs > $out_dir/dev.eng-kan.tsv
+    mtdata echo Flores-flores200_devtest-1-eng-kan | clean-segs > $out_dir/test.eng-kan.tsv
     for split in train dev test; do
         cut -f1 $out_dir/$split.eng-kan.tsv > $out_dir/$split.eng
         cut -f2 $out_dir/$split.eng-kan.tsv > $out_dir/$split.kan
@@ -58,13 +70,13 @@ mkdir -p $out_dir
 }
 
 ###########  English-German  ###########
-out_dir=$mydir/eng-deu
+out_dir=$data_dir/eng-deu
 mkdir -p $out_dir
 recipe_id=vaswani_etal_2017_ende
 [[ -f $out_dir/._OK ]] || {
-    mtdata echo Statmt-europarl-9-deu-eng | non-empty-tsv > $out_dir/train.deu-eng.tsv
-    mtdata echo Statmt-newstest_deen-2020-deu-eng | non-empty-tsv > $out_dir/dev.deu-eng.tsv
-    mtdata echo Statmt-newstest_deen-2021-deu-eng | non-empty-tsv > $out_dir/test.deu-eng.tsv
+    mtdata echo Statmt-europarl-9-deu-eng | clean-segs > $out_dir/train.deu-eng.tsv
+    mtdata echo Statmt-newstest_deen-2020-deu-eng | clean-segs > $out_dir/dev.deu-eng.tsv
+    mtdata echo Statmt-newstest_deen-2021-deu-eng | clean-segs > $out_dir/test.deu-eng.tsv
     for split in train dev test; do
         cut -f1 $out_dir/$split.deu-eng.tsv > $out_dir/$split.deu
         cut -f2 $out_dir/$split.deu-eng.tsv > $out_dir/$split.eng
