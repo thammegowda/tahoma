@@ -1,8 +1,14 @@
 # Tahoma
 
+Tahoma is a project for NLP/NMT/LLM experimentation. It is written in C++ to
+overcome a shortcomings of Python ecosystem. This project is inspired by Marian NMT,
+however, it differs from Marian in a very significant way. The backend of this
+experimentation project is powered by libTorch! While MarianNMT does "all by own",
+Tahoma builds upon libTorch; this is intentional. This project is started in 2024,
+hence we use latest C++ standard (C++23) which makes a lot of things simpler. 
+
 
 ## Setup
-
 
 Step 0: Download source code
 
