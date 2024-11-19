@@ -29,7 +29,7 @@ download() {
         echo "$name already exists"
     else
         rm -f $name.zip $name.zip._OK
-        wget -q --show-progress -O $name.zip "${url}" && touch $name.zip._OK
+        wget --no-verbose  -O $name.zip "${url}" && touch $name.zip._OK
     fi
 
     rm -rf $name  # remove incomplete downloads
@@ -45,7 +45,7 @@ download() {
     # check if _OK file exists, else download
     if [[ $DEBUG -eq 1 && ! -f $name-debug.zip._OK ]]; then
         rm -f $name-debug.zip $name-debug.zip._OK
-        wget -q --show-progress -O $name-debug.zip "$DEBUG_URL" \
+        wget --no-verbose -O $name-debug.zip "$DEBUG_URL" \
             && unzip -q -j $name-debug.zip -d $name/lib/ \
             && touch $name-debug.zip._OK
     fi
