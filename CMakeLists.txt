@@ -21,7 +21,10 @@ option(COMPILE_TESTS "Compile tests under the ./tests directory" OFF)
 set(PYTHON_EXECUTABLE python CACHE FILEPATH "Python executable name path. Used to find libtorch from pytorch installation")
 find_package(Git QUIET)
 
-set(CMAKE_BUILD_TYPE Debug)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug)
+endif()
+
 if(CMAKE_BUILD_TYPE MATCHES Debug)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -ggdb3 -O0")
     message(STATUS "Debug build. Flags set to retain most debug info and disable all optimizations")

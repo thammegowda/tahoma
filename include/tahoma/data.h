@@ -7,8 +7,8 @@ using namespace tahoma;
 
 namespace tahoma::data {
 
-    auto read_lines(std::string path) -> Generator<std::string>;
-    auto read_lines(std::vector<std::string> data_paths) -> Generator<std::vector<std::string>>;
+    auto read_lines(const std::string& path) -> Generator<std::string>;
+    auto read_lines(const std::vector<std::string>& data_paths) -> Generator<std::vector<std::string>>;
 
     template <typename T>
     auto vector_to_generator(const std::vector<T>& vec) -> Generator<T> {

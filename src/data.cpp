@@ -393,10 +393,11 @@ namespace tahoma::data {
             }
         }
 
-        auto read_lines_maxi_batched(std::vector<std::string> data_paths, i32 maxi_batch_size) -> Generator<vector2d<std::string>> {
+        auto read_lines_maxi_batched(const std::vector<std::string>& data_paths,
+            i32 maxi_batch_size) -> Generator<vector2d<std::string>> {
             auto rows = read_lines(data_paths);  // generator<vector<string>>
             vector2d<std::string> buffer(maxi_batch_size);
-            for (auto line : rows) {
+            for (auto& line : rows) {
                 buffer.push_back(line);
                 if (buffer.size() >= maxi_batch_size) {
                     co_yield buffer;
@@ -419,9 +420,9 @@ namespace tahoma::data {
             auto max_length = this->config[dataset_name]["max_length"].as<vector<size_t>>();
             auto maxi_batch_size = maxi_batch * mini_batch;
 
-            std::vector<i32> eos_ids = {};
+            auto eos_ids = std::vector<i32>(vocabs.size());
             // iterate through vocabs and get eos_id for each vocab
-            for (auto vocab : vocabs) {
+            for (const auto& vocab : vocabs) {
                 eos_ids.push_back(vocab->eos_id());
             }
 
@@ -441,6 +442,11 @@ namespace tahoma::data {
                 bool reader_done = false;
                 i32 n_workers_started = 0;
                 i32 n_workers_done = 0;
+
+                StatusContainer() = default;
+                StatusContainer(StatusContainer&&) = delete;
+                StatusContainer(const StatusContainer&) = delete;
+                StatusContainer& operator=(const StatusContainer&) = delete;
 
                 bool is_done() {
                     return reader_done && n_workers_started > 0 && n_workers_done == n_workers_started;
@@ -484,7 +490,7 @@ namespace tahoma::data {
                     auto examples = read_examples(vector_to_generator<>(maxi_batch), max_length, max_length_crop);
                     auto examples_shufd = buffered_shuffle(examples, mini_batch * maxi_batch_size);
                     auto batches = make_batches(examples_shufd, mini_batch);
-                    for (auto batch : batches) {
+                    for (auto& batch : batches) {
                         std::unique_lock<std::mutex> lock(mutex);
                         cv.wait(lock, [&] { return mini_batch_queue.size() < max_queue_size; });
                         mini_batch_queue.push(batch);
@@ -548,7 +554,7 @@ namespace tahoma::data {
         file.close();
     }
 
-    auto read_lines(std::vector<str> data_paths) -> Generator<std::vector<std::string>> {
+    auto read_lines(const std::vector<str>& data_paths) -> Generator<std::vector<std::string>> {
         if (data_paths.empty()) {
             throw std::runtime_error("No data files specified");
         }
