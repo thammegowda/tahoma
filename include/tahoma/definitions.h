@@ -36,7 +36,8 @@ namespace tahoma {
     using f32 = float;
     using f64 = double;
     //using f128 = long double;
-    using str = std::string;
+    using str = std::string; // DEPRECATED
+    using string = std::string;
     using cstr = const char*;
 
     template<typename T>
@@ -51,12 +52,40 @@ namespace tahoma {
     using namespace torch::indexing;
     using Tensor = torch::Tensor;
     using Slice = torch::indexing::Slice;
-    using Pack = std::map<std::string, std::any>;
+
+    //using Pack = std::map<std::string, std::any>;
+
+    class Pack : public std::map<std::string, std::any> {
+    public:
+
+    Pack() = default;
+    Pack(std::initializer_list<value_type> init) : std::map<std::string, std::any>(init) {}
+    Pack(const Pack& other) = default;
+    Pack(Pack&& other) noexcept = default;
+    Pack& operator=(const Pack& other) = default;
+    Pack& operator=(Pack&& other) noexcept = default;
+
+        template<typename T>
+        auto get(const std::string& key, T fallback) -> T const{
+            if (this->contains(key)) {
+                return std::any_cast<T>(this->at(key));
+            } else {
+                return fallback;
+            }
+        }
+    };
+
+    using TensorPack = std::map<std::string, torch::Tensor>;
     //auto k_device = torch::device(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
 
+    inline auto DEVICE = torch::Device(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
+
+    template<typename T>
+    using Ptr = std::shared_ptr<T>;
+
     /*
-    template<typename T> using Ptr = std::shared_ptr<T>;
-    template<typename T> using New = std::make_shared<T>;
+    template<typename T>
+    using New = std::make_shared<T>;
     template<typename T> using Ptru = std::unique_ptr<T>;
     template<typename T> using Ptrw = std::weak_ptr;
     */
@@ -78,6 +107,7 @@ namespace tahoma {
     enum class TaskType {
         LM,
         NMT,
+        REGRESSION,
     };
 
 } // namespace tahoma

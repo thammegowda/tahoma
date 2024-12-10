@@ -4,11 +4,12 @@ message(STATUS "CMAKE_CURRENT_SOURCE_DIR: ${CMAKE_CURRENT_SOURCE_DIR}")
 message(STATUS "CMAKE_CURRENT_BINARY_DIR: ${CMAKE_CURRENT_BINARY_DIR}")
 
 
-add_executable(tahoma-tests tahoma_tests.cpp)
+add_executable(tahoma-tests main.cpp)
 target_link_libraries(tahoma-tests PUBLIC tahoma_lib Backward::Interface)
 #add_backward(tahoma-tests)
 
 
+set(TEST_CONFIG ${CMAKE_SOURCE_DIR}/examples/transformer-nmt.yaml)
 set(TEST_CONFIG ${CMAKE_SOURCE_DIR}/examples/transformer-nmt.yaml)
 
 # tests that require a config file to run
@@ -27,3 +28,10 @@ foreach(test ${CONFIG_BASED_TESTS})
         COMMAND tahoma-tests ${test} ${TEST_CONFIG}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endforeach()
+
+
+add_test(NAME npz_load
+    COMMAND tahoma-tests npz_load ${CMAKE_CURRENT_SOURCE_DIR}/data/test.npz
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# TODO: add tests for model persistence and loading

@@ -1,3 +1,4 @@
+#pragma once
 // taken from https://en.cppreference.com/w/cpp/coroutine/coroutine_handle
 
 #include <coroutine>

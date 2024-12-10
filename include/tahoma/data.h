@@ -2,13 +2,14 @@
 #pragma once
 #include <tahoma.h>
 #include <sentencepiece_processor.h>
+#include <tahoma/utils.h>
 
 using namespace tahoma;
 
 namespace tahoma::data {
 
-    auto read_lines(std::string path) -> Generator<std::string>;
-    auto read_lines(std::vector<std::string> data_paths) -> Generator<std::vector<std::string>>;
+    auto read_lines(const std::string& path) -> Generator<std::string>;
+    auto read_lines(const std::vector<std::string>& data_paths) -> Generator<std::vector<std::string>>;
 
     template <typename T>
     auto vector_to_generator(const std::vector<T>& vec) -> Generator<T> {
@@ -60,16 +61,15 @@ namespace tahoma::data {
         ~Batch() = default;
     };
 
-    auto load_vocabs(const config::Config& config) -> std::vector<std::shared_ptr<sentencepiece::SentencePieceProcessor>>;
-
     struct DataLoader {
         std::vector<std::shared_ptr<sentencepiece::SentencePieceProcessor>> vocabs;
         config::Config config;
 
         DataLoader(config::Config config, std::vector<std::shared_ptr<sentencepiece::SentencePieceProcessor>> vocabs):
             config(config), vocabs(vocabs) {}
+
         DataLoader(config::Config config):
-            DataLoader(config, load_vocabs(config)) {}
+            DataLoader(config, utils::load_vocabs(config["schema"]["vocabs"].as<vector<string>>())) {}
 
         ~DataLoader() = default;
 

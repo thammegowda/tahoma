@@ -77,7 +77,7 @@ namespace tahoma::tests {
         return count == 0 ? 0 : 1;
     }
 
-     int test_data_loader_sync(std::vector<std::string> args) {
+    int test_data_loader_sync_reimpl(std::vector<std::string> args) {
         auto config_file = args[0];
         auto config = tahoma::config::Config(config_file);
         auto data_loader = tahoma::data::DataLoader(config);
@@ -121,7 +121,36 @@ namespace tahoma::tests {
                 break;
             }
         }
-        // TODO: parse the current_los_message for rate and check it is positive
+        // TODO: parse the current_log_message for rate and check it is positive
+        return batch_count == max_batches ? 0 : 1;
+    }
+
+    int test_data_loader_sync(std::vector<std::string> args) {
+        auto config_file = args[0];
+        auto config = tahoma::config::Config(config_file);
+        auto data_loader = tahoma::data::DataLoader(config);
+        auto n_data_threads = 0;
+        auto batches = data_loader.get_train_data(n_data_threads);
+
+        /////
+        size_t batch_count = 0;
+        size_t max_batches = 2'000;
+        auto counter = tahoma::train::StatsCounter();
+        for (auto batch : batches) {
+            batch_count++;
+            size_t total_tokens = 0;
+            for (const auto& ex : batch.examples) {
+                total_tokens += ex.field_ids[0].size();
+            }
+            counter.update(0.0, batch.size(), total_tokens, 0.0);
+            if (batch_count % 250 == 0) {
+                std::cerr << counter.current_log_message() << std::endl;
+            }
+            if (batch_count >= max_batches) {
+                break;
+            }
+        }
+        // TODO: parse the current_log_message for rate and check it is positive
         return batch_count == max_batches ? 0 : 1;
     }
 
@@ -132,7 +161,7 @@ namespace tahoma::tests {
         int32_t nthreads = 2;
         size_t max_batches = 2'000;
         size_t batch_count = 0;
-        auto batches = data_loader.get_data_async("trainer", nthreads);
+        auto batches = data_loader.get_data_async_new("trainer", nthreads);
         auto counter = tahoma::train::StatsCounter();
         for (auto batch : batches) {
             batch_count++;

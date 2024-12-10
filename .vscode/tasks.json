@@ -15,7 +15,7 @@
 		{
 			"type": "shell",
 			"label": "build-quick",
-			"command": "cmake --build build-debug -j",
+			"command": "cmake . -B build-debug && cmake --build build-debug -j4",
 			"problemMatcher": [
 				"$gcc"
 			]

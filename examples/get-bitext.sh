@@ -1,4 +1,4 @@
-#!/usr/env/bin bash
+#!/usr/bin/env bash
 # Download sample datasets and create SentencePiece models
 
 # Created by Thamme "TG" Gowda, circa 2024-10

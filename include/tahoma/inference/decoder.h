@@ -1,19 +1,19 @@
 #pragma once
 #include <sentencepiece_processor.h>
 #include <tahoma.h>
-#include <tahoma/model/transformer_nmt.h>
+#include <tahoma/model.h>
 
  namespace tahoma::inference {
 
     class Decoder {
     private:
-        std::shared_ptr<model::TransformerNMTImpl> _model;
+        std::shared_ptr<model::LanguageModel> _model;
         nn::AnyModule _lm_head;
         std::vector<std::shared_ptr<sentencepiece::SentencePieceProcessor>> _vocabs;
         torch::Device _device;
 
     public:
-        Decoder(std::shared_ptr<model::TransformerNMTImpl> model,
+        Decoder(std::shared_ptr<model::LanguageModel> model,
                 nn::AnyModule lm_head,
                 std::vector<std::shared_ptr<sentencepiece::SentencePieceProcessor>> vocabs,
                 torch::Device device);

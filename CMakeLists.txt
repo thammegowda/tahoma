@@ -1,11 +1,14 @@
-cmake_minimum_required(VERSION 3.25.2 FATAL_ERROR)
-# older cmake doesnt support CUDA_STANDARD 20
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
+# older cmake doesnt support CUDA_STANDARD 20  https://stackoverflow.com/q/75010206/1506477
+# if you cannot upgrade cmake, you may use your older cmake to compile CPU only build or use older CUDA version
+
 project(tahoma CXX C)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # cuda does not support c++23 yet
 set (CMAKE_CUDA_STANDARD 20)
 set (CMAKE_CUDA_STANDARD_REQUIRED ON)
+set (CMAKE_COLOR_DIAGNOSTICS ON)  # colored output
 
 # set options with default values
 option(USE_CCACHE "Use ccache compiler cache (https://ccache.dev)" ON)
@@ -21,7 +24,10 @@ option(COMPILE_TESTS "Compile tests under the ./tests directory" OFF)
 set(PYTHON_EXECUTABLE python CACHE FILEPATH "Python executable name path. Used to find libtorch from pytorch installation")
 find_package(Git QUIET)
 
-set(CMAKE_BUILD_TYPE Debug)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug)
+endif()
+
 if(CMAKE_BUILD_TYPE MATCHES Debug)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -ggdb3 -O0")
     message(STATUS "Debug build. Flags set to retain most debug info and disable all optimizations")
@@ -83,6 +89,7 @@ include_directories(
     "${CMAKE_SOURCE_DIR}/libs/yaml-cpp/include"
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_SOURCE_DIR}/libs/backward-cpp"
+    "${CMAKE_SOURCE_DIR}/libs/cnpy"
 )
 
 
@@ -104,14 +111,22 @@ set(TAHOMA_SOURCES
     src/config.cpp
     src/data.cpp
     src/inference/decoder.cpp
+    src/inference/predictor.cpp
     src/layer/transformer.cpp
+    src/model.cpp
     src/model/transformer_lm.cpp
     src/model/transformer_nmt.cpp
+    src/model/mt5.cpp
+    src/serialize.cpp
     src/train/criterion.cpp
     src/train/loss_computer.cpp
     src/train/stats_counter.cpp
     src/train/trainer.cpp
-    src/train/utils.cpp
+    src/utils.cpp
+    src/vocab.cpp
+
+    # third party libs sources
+    libs/cnpy/cnpy.cpp
 )
 
 add_library(tahoma_lib STATIC ${TAHOMA_SOURCES})

@@ -5,15 +5,46 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(gdb launch) tahoma",
+            "name": "tahoma train",
             "preLaunchTask": "build-quick", // or build-full
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build-debug/tahoma",
             "args": [
+                "train",
                 "${workspaceFolder}/runs/01-tfm",
                 "-c",
                 "${workspaceFolder}/examples/transformer-nmt.yaml"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "tahoma predict",
+            "preLaunchTask": "build-quick", // or build-full
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build-debug/tahoma",
+            "args": [
+                "predict",
+                "-m", "${workspaceFolder}/tmp/metricx-24-hybrid-large-v2p6/model.npz",
+                "-v", "${workspaceFolder}/tmp/mt5-base/spiece.model",
+                "-i", "${workspaceFolder}/tests/data/sample.src-mt-ref.tsv"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

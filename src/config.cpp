@@ -10,13 +10,6 @@
 namespace tahoma::config {
 
 
-    Config::Config(const std::string& filename, bool validate)
-        : YAML::Node {YAML::LoadFile(filename)} {
-            if (validate){
-                validate_config(*this);
-            }
-    }
-
     void Config::validate_config(const YAML::Node& config) {
         std::vector<std::string> expected_keys = { "model", "schema", "optimizer", "trainer", "validator" };
         for (auto key : expected_keys) {

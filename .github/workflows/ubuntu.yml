@@ -1,6 +1,6 @@
 # This starter workflow is for a CMake project running on a single platform. There is a different starter workflow if you need cross-platform coverage.
 # See: https://github.com/actions/starter-workflows/blob/main/ci/cmake-multi-platform.yml
-name: CMake on Ubuntu
+name: Ubuntu Build and Test
 
 on:
   push:
@@ -10,7 +10,8 @@ on:
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
-  BUILD_TYPE: Release
+  BUILD_TYPE: Debug
+  NJOBS: 2
 
 jobs:
   build:
@@ -24,22 +25,30 @@ jobs:
 
     - name: Setup
       run: |
+        sudo apt-get update -y && sudo apt-get install -y gcc-12 g++-12 cmake build-essential pkg-config libgoogle-perftools-dev libdw-dev libunwind-dev
         bash ${{github.workspace}}/libs/setup.sh cpu
-        python -m pip install --upgrade pip && python -m pip install mtdata==0.4.2
-        export PATH=$PATH:$HOME/.local/bin
 
     - name: Configure CMake
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCOMPILE_TESTS=on
 
     - name: Build
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -j ${{env.NJOBS}}
 
-    - name: GetTestData
+    - name: Cache Test Data
+      uses: actions/cache@v3
+      with:
+        key: ${{runner.os}}-data-${{hashFiles('${{github.workspace}}/examples/get-bitext.sh')}}
+        path: |
+          ${{github.workspace}}/data
+          ~/.mtdata/
+
+    - name: Get Test Data (English-Kannada)
       run: |
+        python -m pip install --upgrade pip && python -m pip install mtdata==0.4.2
+        export PATH=$PATH:$HOME/.local/bin
         bash examples/get-bitext.sh eng-kan
 
-    - name: Test
-      working-directory: ${{github.workspace}}/build
+    - name: Unit Tests
       # Execute tests defined by the CMake configuration.
       # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
-      run: ctest -C ${{env.BUILD_TYPE}}
+      run: ctest -C ${{env.BUILD_TYPE}} --test-dir ${{github.workspace}}/build/tests -j ${{env.NJOBS}}

@@ -14,6 +14,9 @@ namespace tahoma::model {
             virtual TaskType task_type() = 0;
             // virtual functions and templates dont mix. so we use std::any for the return type
             virtual Pack forward(Pack& args) = 0;
+
+            auto get_state() -> Pack;
+            auto set_state(Pack& state) -> Pack;
         };
 
 
@@ -22,10 +25,11 @@ namespace tahoma::model {
         size_t model_dim;
         nn::Linear lm_head;
 
-        LanguageModel(size_t model_dim, size_t vocab_size):
+        LanguageModel(size_t model_dim, size_t vocab_size, bool lm_bias=false):
             model_dim { model_dim },
             vocab_size { vocab_size },
-            lm_head { register_module("lm_head", nn::Linear(nn::LinearOptions(model_dim, vocab_size))) }
+            lm_head { register_module("lm_head", 
+                nn::Linear(nn::LinearOptions(model_dim, vocab_size).bias(false))) }
         {}
     };
 

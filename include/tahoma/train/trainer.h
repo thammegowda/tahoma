@@ -3,14 +3,28 @@
 #include <tahoma/train/stats_counter.h>
 #include <tahoma/train/criterion.h>
 #include <tahoma/train/loss_computer.h>
-#include <tahoma/train/utils.h>
+#include <tahoma/utils.h>
 #include <tahoma/model.h>
 #include <tahoma/data.h>
 
 
-
-
 namespace tahoma::train {
+
+     enum class StopperStatus {
+        STOP,  // early stop reached
+        CONTINUE, // continue training
+        NEW_BEST, // new best loss, and continue training
+    };
+
+    struct Stopper {
+        int32_t patience = 10;
+        int32_t num_stalls = 0;
+        float best_loss = std::numeric_limits<float>::infinity();
+        Stopper(int32_t patience) : patience{ patience } {}
+        auto is_stop(float loss) -> StopperStatus;
+    };
+
+    
     class Trainer {
     protected:
         fs::path _work_dir;

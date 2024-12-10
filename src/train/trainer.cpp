@@ -13,8 +13,8 @@
 #include <tahoma/train/stats_counter.h>
 #include <tahoma/train/criterion.h>
 #include <tahoma/train/loss_computer.h>
-#include <tahoma/train/utils.h>
 #include <tahoma/train/trainer.h>
+#include <tahoma/utils.h>
 
 namespace nn = torch::nn;
 namespace optim = torch::optim;
@@ -25,24 +25,36 @@ using namespace tahoma;
 
 namespace tahoma::train {
 
-    auto DEVICE = torch::Device(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
-
+    
+    auto Stopper::is_stop(float loss) -> StopperStatus {
+        using enum StopperStatus;
+        if (loss < best_loss) {
+            best_loss = loss;
+            num_stalls = 0;
+            spdlog::info("New best loss: {:.5f}", loss);
+            return NEW_BEST;
+        } else {
+            num_stalls++;
+            spdlog::info("No improvement in last {} validations; patience={}; best={:.5f}; current={:.5f}", num_stalls, patience, best_loss, loss);
+            return num_stalls >= patience ? STOP : CONTINUE;
+        }
+    }
 
     Trainer::Trainer(fs::path work_dir, config::Config conf)
         : _work_dir{ work_dir },
         _config{ conf },
         _device{ DEVICE },
-        _model{ init_model(_config, _device)},
+        _model{ utils::init_model(_config, _device)},
         _task_type{ _model->task_type() },
         _projector{ _model->lm_head },
-        _optimizer{ init_optimizer(_config, _model) },
-        _scheduler{ init_scheduler(_config, *_optimizer) },
+        _optimizer{ utils::init_optimizer(_config, _model) },
+        _scheduler{ utils::init_scheduler(_config, *_optimizer) },
 
         _data_loader{ tahoma::data::DataLoader(_config) },
         _fp16_enabled{ _config["trainer"]["fp16"].as<bool>(false) },
         _pad_id {_data_loader.output_vocab()->pad_id()},
         _bos_id {_data_loader.output_vocab()->bos_id()},
-        _loss_computer{  init_loss_computer(_config, _projector, _pad_id) },
+        _loss_computer{  utils::init_loss_computer(_config, _projector, _pad_id) },
         _sample_batch{ _data_loader.get_samples(_config["validator"]["data"].as<std::vector<std::string>>(), /*n_samples*/5) },
         _stopper{ _config["trainer"]["early_stopping"].as<int>(8) }
     {
@@ -56,7 +68,7 @@ namespace tahoma::train {
     }
 
     Trainer::Trainer(fs::path work_dir, fs::path config_file)
-        : Trainer(work_dir, init_config(work_dir, config_file))
+        : Trainer(work_dir, utils::init_config(work_dir, config_file))
     {}
 
         void Trainer::save_checkpoint(std::string tag) {
@@ -78,7 +90,7 @@ namespace tahoma::train {
 
             auto src_mask = src_ids.eq(_pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
             auto tgt_mask_padding = bos_tgt_ids.eq(_pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
-            auto tgt_mask_autoreg = subsequent_mask(bos_tgt_ids.size(1), _device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len]
+            auto tgt_mask_autoreg = utils::subsequent_mask(bos_tgt_ids.size(1), _device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len]
             auto tgt_mask = tgt_mask_padding | tgt_mask_autoreg.type_as(tgt_mask_padding); // [batch_size, 1, seq_len, seq_len]
             auto normalizer = (bos_tgt_ids != _pad_id).sum().item().toLong(); // #total - #mask
 
@@ -102,7 +114,7 @@ namespace tahoma::train {
             auto bos_tgt_ids = torch::cat({_bos_col, inp_ids}, 1);
 
             auto tgt_mask_padding = bos_tgt_ids.eq(_pad_id).unsqueeze(1).unsqueeze(2); // [batch_size, 1, 1, seq_len]
-            auto tgt_mask_autoreg = subsequent_mask(bos_tgt_ids.size(1), _device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len]
+            auto tgt_mask_autoreg = utils::subsequent_mask(bos_tgt_ids.size(1), _device).unsqueeze(0).unsqueeze(1); // [1, 1, seq_len, seq_len]
             auto tgt_mask = tgt_mask_padding | tgt_mask_autoreg.type_as(tgt_mask_padding); // [batch_size, 1, seq_len, seq_len]
             auto normalizer = (bos_tgt_ids != _pad_id).sum().item().toLong(); // #total - #mask
             Pack pack = {

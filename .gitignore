@@ -6,7 +6,9 @@ libs/libtorch*
 **.so
 runs/*
 .ipynb_checkpoints
-
+__pycache__/
+*.log
 /data/
 
 .vscode/settings.json
+tmp/
