@@ -18,12 +18,15 @@ import datetime
 import sys
 import yaml
 import json
+import functools
 import hashlib
+from collections import defaultdict
 
 import torch
 import numpy as np
-import transformers
 import huggingface_hub as hf_hub
+import transformers
+from transformers.utils import WEIGHTS_NAME, WEIGHTS_INDEX_NAME, CONFIG_NAME
 
 log.basicConfig(level=log.INFO)
 
@@ -72,15 +75,74 @@ def str_as_array(s) -> np.ndarray:
     """
     return np.array(list(s.encode('utf-8')), dtype=np.uint8)
 
-def pth_to_npz(pth_file, config_file, npz_file, md5=False, model_id=None):
-    log.info(f'Converting {pth_file} to {npz_file}')
+
+
+""" 
+For some models, e.g. metricx and unbabel-comets, the model code is not part of transformers lib.
+So, we cant directly load the model with transformers automodel APIs.
+We use lower level APIs to load the model weights without instantiating the nn.Module object.
+"""
+
+load_torch_weights = functools.partial(torch.load, weights_only=True) 
+
+def load_torch_weights_sharded(model_id, map_location=None):
+    """
+    HF's impl directly loads weights to nn.Module subclass. But we need state without binding to nn.Module.
+    So we are rewriting the function here. See the link for original implementation:
+    https://github.com/huggingface/transformers/blob/ca03842cdcf2823301171ab27aec4b6b1cafdbc1/src/transformers/modeling_utils.py#L408
+    """
+    index_file = hf_hub.hf_hub_download(repo_id=model_id, filename=WEIGHTS_INDEX_NAME)
+    index = json.loads(Path(index_file).read_text())
     state = {}
-    state = torch.load(pth_file, weights_only=True)
+    # index is key to shard
+    shard2key = defaultdict(list)
+    for k, v in index["weight_map"].items():
+        shard2key[v].append(k)
+    shard_names = list(sorted(shard2key.keys()))
+    assert shard_names, f'No shards found in {index_file}'
+    log.info(f'Loading {len(shard_names)} shards: {shard_names}')
+    for shard_name in shard_names:
+        log.info(f'Loading shard {shard_name} and expecting {len(shard2key[shard_name])} keys in it.')
+        shard_file = hf_hub.hf_hub_download(repo_id=model_id, filename=shard_name)
+        shard_state = load_torch_weights(shard_file, map_location=map_location)
+        # only select designated keys in the shard
+        for key in shard2key[shard_name]:
+            state[key] = shard_state[key]
+    return state
+
+def load_torch_state(args) -> dict:
+    try: 
+        weights_file = hf_hub.hf_hub_download(repo_id=args.model, filename=WEIGHTS_NAME)
+        return load_torch_weights(weights_file)
+    except Exception as e:
+        log.warning(f'Failed to load weights from {WEIGHTS_NAME}.', e)
+
+    try:
+        log.info(f'Attempting shard index {WEIGHTS_INDEX_NAME}')
+        return load_torch_weights_sharded(args.model)
+    except Exception as e:
+        log.warning('Failed to load weights from sharded files.', e)
+
+    raise Exception(f'Failed to load model weights from {args.model}. Tried {WEIGHTS_NAME} and {WEIGHTS_INDEX_NAME}.')
+
+
+def pth_to_npz(args):
+    log.info(f'Converting {args.model} to {args.output}')
+    state = {}
+    state = load_torch_state(args)
     for k, v in state.items():
         if isinstance(v, torch.Tensor):
             state[k] = v.numpy()
     model_type = None
-    Path(npz_file).resolve().parent.mkdir(parents=True, exist_ok=True)
+    npz_file: Path = args.output
+    npz_file.resolve().parent.mkdir(parents=True, exist_ok=True)
+    config_file = None
+    model_id = "hf://" + args.model
+    try:
+        # note: unbabel uses hparams name
+        config_file = hf_hub.hf_hub_download(repo_id=args.model, filename=CONFIG_NAME)
+    except:
+        log.warning(f'Config file {CONFIG_NAME} not found in the model repository')
     if config_file:
         config_file = Path(config_file)
         assert config_file.exists(), f'Config file {config_file} does not exist.'
@@ -106,26 +168,25 @@ def pth_to_npz(pth_file, config_file, npz_file, md5=False, model_id=None):
     assert 'meta.yml' not in state, 'meta.json already exists in the state dict.'
     meta = {}
     meta['converted_at'] = str(datetime.datetime.now())
-    meta['converted_from'] = str(pth_file).replace(str(Path.home()), '~')
     meta['conversion_runtime'] = runtime_versions()
-    if md5:
-        meta['original_md5'] = file_md5(pth_file)
-    if model_id:
-        meta['model_id'] = model_id
+    meta['model_id'] = model_id
     state['meta.yml'] = str_as_array(yaml.dump(meta))
     log.info(f'Saving {npz_file}')
     np.savez(npz_file, **state)
 
 
-
 def main():
     args = parse_args()
-    assert args.output.name.endswith('.npz'), 'Output file must have .npz extension.'
+    
+    if not args.output.name.endswith('.npz'):
+        # assume it is a directory
+        ext = args.output.name.split('.')[-1]
+        assert ext.lower() not in ('.pth', '.bin'), \
+            f'Output file should be .npz extension. Avoid {ext}. Or just use directory and let me create the file inside it.'
+        args.output = args.output / "model.npz"
+        log.info(f'Output file is {args.output}')
     #hf_to_torchscript(args.model, args.output, args.type)
-    model_path = hf_hub.hf_hub_download(repo_id=args.model, filename=args.file)
-    config_path = hf_hub.hf_hub_download(repo_id=args.model, filename="config.json")
-    model_id = "hf://" + args.model
-    pth_to_npz(model_path, config_path, args.output, md5=False, model_id=model_id)
+    pth_to_npz(args)
 
     vocab_file_names = ['spiece.model', 'sentencepiece.bpe.model']
     for name in vocab_file_names:
