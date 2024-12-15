@@ -10,15 +10,21 @@
 namespace tahoma::inference {
 
     void predict_scores(Ptr<model::LanguageModel> model, data::DataLoader& loader, string file_name, Pack kwargs) {
-        bool is_qe = std::any_cast<bool>(kwargs.contains("is_qe") ? kwargs["is_qe"] : false);
+        bool is_qe = kwargs.get("qe", false);
         size_t width = kwargs.get("width", 6);
         size_t batch_size = kwargs.get("batch_size", 4);
 
         auto lines = utils::read_lines(file_name);
         assertm(model->task_type() == TaskType::REGRESSION, "Only regression models are supported for scoring");
+        // TODO: support other models
         auto regression_model = std::dynamic_pointer_cast<model::metricx::RegressionImpl>(model);
         if (regression_model == nullptr) {
             throw std::runtime_error("Failed to cast model to RegressionImpl");
+        }
+
+        bool print_model = kwargs.get("print_model", false);
+        if (print_model) {
+            std::cerr << "model:\n" << *model << std::endl;
         }
 
         auto PAD_ID = loader.vocabs[0]->pad_id();

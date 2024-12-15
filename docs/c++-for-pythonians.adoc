@@ -8,7 +8,7 @@ The language has evolved a lot over the years, and the latest versions have a lo
 At the time of writing, C++23 seems to be the latest, stable-enough version. C++26 is in the works, but it will take some time before it is widely adopted.
 
 
-1. Learn new C++ (e.g. C++23) features. Forget the old ways when you can.
+*. Learn new C++ (e.g. C++23) features. Forget the old ways when you can.
 *. Dont collide namespaces. Use `using namespace std;` only in small programs. For larger programs, use `std::` prefix instead of colliding namespaces.
 *. Use `auto` keyword to let the compiler deduce the type of the variable. This makes the code more readable and less error-prone
 *. Use `nullptr` instead of `NULL` or `0`. `nullptr` is a pointer literal that can be converted to any pointer type.

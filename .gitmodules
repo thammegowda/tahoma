@@ -6,10 +6,6 @@
 	path = libs/sentencepiece
 	url = https://github.com/google/sentencepiece.git
 	branch = master
-[submodule "libs/tomlplusplus"]
-	path = libs/tomlplusplus
-	url = https://github.com/marzer/tomlplusplus.git
-	branch = master
 [submodule "libs/backward-cpp"]
 	path = libs/backward-cpp
 	url = https://github.com/bombela/backward-cpp.git

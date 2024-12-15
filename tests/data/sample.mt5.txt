@@ -1,0 +1,3 @@
+translate English to German: Hello world.
+translate English to Chinese: This is a test sentence.
+translate English to Spanish: And here is another sentence.

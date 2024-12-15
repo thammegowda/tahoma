@@ -42,6 +42,10 @@ int main(int argc, char* argv[]) {
         .help("Quality Estimation model")
         .default_value(false)
         .implicit_value(true);
+    predict_cmd.add_argument("-pm", "--print-model")
+        .help("Print model architecture")
+        .default_value(false)
+        .implicit_value(true);
 
     parser.add_argument("-V", "--verbose")
         .help("Increase log verbosity")
@@ -58,7 +62,7 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
 
-    /// ===================== 
+    /// =====================
     if (parser.get<bool>("verbose")) {
         spdlog::set_level(spdlog::level::debug);
     }
@@ -85,8 +89,11 @@ int main(int argc, char* argv[]) {
         auto model_path = predict_cmd.get<std::string>("model");
         auto vocab_paths = predict_cmd.get<std::vector<std::string>>("vocab");
         auto input_file = predict_cmd.get<std::string>("input");
-        auto is_qe = predict_cmd.get<bool>("qe");
-        inference::predict(model_path, vocab_paths, input_file, {{"is_qe", is_qe}});
+        Pack kwargs = {
+            {"qe", predict_cmd.get<bool>("qe")},
+            {"print_model", predict_cmd.get<bool>("print-model")}
+        };
+        inference::predict(model_path, vocab_paths, input_file, kwargs);
     } else {
         std::cerr << "Unknown command. Knwon commands: train, predict\n";
         std::cerr << parser;

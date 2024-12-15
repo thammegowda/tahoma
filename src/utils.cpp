@@ -213,12 +213,17 @@ namespace tahoma::utils {
         /**
          * Read lines from a file and yield them one by one.
          */
-        std::ifstream stream(path);
+        std::ifstream stream;
+        if (path == "-"){
+            // FIXME: This wont work on Windows and non POSIX systems
+            stream = std::ifstream("/dev/stdin");
+        } else {
+            stream = std::ifstream(path);
+        }
         std::string line;
         while (std::getline(stream, line)) {
             co_yield line;
         }
-        stream.close();
     }
 
     auto split(const std::string& text, const std::string& delimiter) -> std::vector<std::string> {
