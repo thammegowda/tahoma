@@ -22,11 +22,6 @@ namespace tahoma::inference {
             throw std::runtime_error("Failed to cast model to RegressionImpl");
         }
 
-        bool print_model = kwargs.get("print_model", false);
-        if (print_model) {
-            std::cerr << "model:\n" << *model << std::endl;
-        }
-
         auto PAD_ID = loader.vocabs[0]->pad_id();
         torch::Device device = DEVICE;
         vector<i32> eos_ids = {}; // EOS IDs are not required. Google's code removes it from HF tokenizer's output
@@ -160,9 +155,11 @@ namespace tahoma::inference {
 
     void predict(string model_path, vector<string> vocab_paths, string input_file, Pack kwargs) {
         auto [config, model] = utils::restore_model(model_path, DEVICE, /*validate_config=*/false);
-        //serialize::store_npz(model_path  + ".restore.npz", model->get_state());
+        bool print_model = kwargs.get("print_model", false);
+        if (print_model) {
+            std::cerr << "model:\n" << *model << std::endl;
+        }
 
-        //std::cerr << "model:\n" << *model << std::endl;
         auto vocabs = utils::load_vocabs(vocab_paths);
         auto data_loader = data::DataLoader(config, vocabs);
         // disable autograd; set model to eval mode

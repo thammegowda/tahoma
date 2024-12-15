@@ -38,6 +38,11 @@ int main(int argc, char* argv[]) {
         .help("Input file containing TSV records. '-' for stdin. For metrics, the following field order is expected: source, hypothesis, reference")
         .default_value("-");
 
+    predict_cmd.add_argument("-bs", "--batch-size")
+        .scan<'d', int>()
+        .help("Batch Size")
+        .default_value("1");
+
     predict_cmd.add_argument("-qe", "--qe")
         .help("Quality Estimation model")
         .default_value(false)
@@ -89,11 +94,12 @@ int main(int argc, char* argv[]) {
         auto model_path = predict_cmd.get<std::string>("model");
         auto vocab_paths = predict_cmd.get<std::vector<std::string>>("vocab");
         auto input_file = predict_cmd.get<std::string>("input");
-        Pack kwargs = {
+        Pack pred_args = {
             {"qe", predict_cmd.get<bool>("qe")},
-            {"print_model", predict_cmd.get<bool>("print-model")}
+            {"print_model", predict_cmd.get<bool>("print-model")},
+            {"batch_size", predict_cmd.get<int>("batch-size")}
         };
-        inference::predict(model_path, vocab_paths, input_file, kwargs);
+        inference::predict(model_path, vocab_paths, input_file, pred_args);
     } else {
         std::cerr << "Unknown command. Knwon commands: train, predict\n";
         std::cerr << parser;
