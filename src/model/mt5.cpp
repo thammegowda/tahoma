@@ -123,9 +123,9 @@ namespace tahoma::model::mt5 {
         return relative_buckets;
     }
 
-    auto AttentionImpl::compute_bias(i64 query_length, i64 mem_length) -> Tensor {
-        auto qry_pos = torch::arange(query_length, torch::kInt64).view({ -1, 1 });
-        auto mem_pos = torch::arange(mem_length, torch::kInt64).view({ 1, -1 });
+    auto AttentionImpl::compute_bias(i64 query_length, i64 mem_length, torch::Device device) -> Tensor {
+        auto qry_pos = torch::arange(query_length, torch::dtype(torch::kInt64).device(device)).view({ -1, 1 });
+        auto mem_pos = torch::arange(mem_length, torch::dtype(torch::kInt64).device(device)).view({ 1, -1 });
         auto rel_pos = mem_pos - qry_pos;
         auto rel_pos_bucket = relative_position_bucket(rel_pos);
         auto pos_embs = relative_attention_bias(rel_pos_bucket);
@@ -154,7 +154,7 @@ namespace tahoma::model::mt5 {
         if (!position_bias.defined() && has_relative_attention_bias) {
             i64 n_queries = query.size(1);
             i64 n_docs = docs.size(1);
-            position_bias = compute_bias(n_queries, n_docs);
+            position_bias = compute_bias(n_queries, n_docs, qs.device());
             output["position_bias"] = position_bias;
         }
         if (position_bias.defined()) {

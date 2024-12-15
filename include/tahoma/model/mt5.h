@@ -62,7 +62,7 @@ namespace tahoma::model::mt5 {
         nn::Dropout dropout;
         AttentionImpl(const YAML::Node& config, bool is_bidirectional, bool has_relative_attention_bias);
         auto relative_position_bucket(Tensor relative_position) -> Tensor;
-        auto compute_bias(i64 query_length, i64 mem_length) -> Tensor;
+        auto compute_bias(i64 query_length, i64 mem_length, torch::Device device) -> Tensor;
         auto forward(Pack& pack) -> Pack;
     };
     TORCH_MODULE(Attention);
