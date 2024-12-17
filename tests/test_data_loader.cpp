@@ -157,10 +157,13 @@ namespace tahoma::tests {
         auto config_file = args[0];
         auto config = tahoma::config::Config(config_file);
         auto data_loader = tahoma::data::DataLoader(config);
-        int32_t nthreads = 2;
-        size_t max_batches = 2'000;
+        size_t nthreads = config["trainer"]["data_threads"].as<size_t>(2);
+        if (nthreads < 2) { // at least 2
+            nthreads = 2;
+        }
+        size_t max_batches = 1'000 * nthreads;
         size_t batch_count = 0;
-        auto batches = data_loader.get_data_async_new("trainer", nthreads);
+        auto batches = data_loader.get_data_async("trainer", nthreads);
         auto counter = tahoma::train::StatsCounter();
         for (auto batch : batches) {
             batch_count++;

@@ -11,7 +11,7 @@ set (CMAKE_CUDA_STANDARD_REQUIRED ON)
 set (CMAKE_COLOR_DIAGNOSTICS ON)  # colored output
 
 # see https://github.com/bombela/backward-cpp?tab=readme-ov-file#libraries-to-read-the-debug-info
-set (BACKWARD_HAS_DW on)
+set (BACKWARD_HAS_DW on)   # sudo apt install libdw-dev
 #set (BACKWARD_HAS_BFD on)
 #set (BACKWARD_HAS_DWARF on)
 

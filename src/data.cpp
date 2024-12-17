@@ -329,58 +329,6 @@ namespace tahoma::data {
         }
     }
 
-    auto DataLoader::get_data_async(std::string dataset_name, i32 num_threads) -> Generator<data::Batch> {
-
-        auto data_paths = this->config[dataset_name]["data"].as<std::vector<std::string>>();
-        auto mini_batch = this->config[dataset_name]["mini_batch"].as<i32>();
-        auto maxi_batch = this->config[dataset_name]["maxi_batch"].as<i32>(1);
-        auto max_length_crop = this->config[dataset_name]["max_length_crop"].as<bool>(true);
-        auto max_length = this->config[dataset_name]["max_length"].as<vector<size_t>>();
-
-        std::mutex mutex;
-        std::condition_variable cv;
-        bool producer_done = false;
-        std::queue<data::Batch> queue;
-        size_t max_queue_size = 256;
-
-        std::thread producer_thread([&] {
-            // NOTE: if *this* object is destroyed before the thread finishes, it will crash
-            auto examples = read_examples(data_paths, max_length, max_length_crop, num_threads);
-            auto examples_shufd = buffered_shuffle(examples, mini_batch * maxi_batch);
-            auto batches = make_batches(examples_shufd, mini_batch);
-            for (auto batch : batches) {
-                std::unique_lock<std::mutex> lock(mutex);
-                cv.wait(lock, [&] { return queue.size() < max_queue_size; });
-                queue.push(batch);
-                lock.unlock();
-                cv.notify_one();
-            }
-            // notify consumers that we are done
-            {
-                std::unique_lock<std::mutex> lock(mutex);
-                producer_done = true;
-            }
-            });
-
-        // NOTE: generator might stop reading anytime which result in thread termination
-        // if you terminate a thread without join or detach, you get "terminate called without an active exception"
-        // and the program crashes. So we detach the thread as we don't need to join it.
-        producer_thread.detach();
-        // read from queue and co_yield
-        while (true) {
-            std::unique_lock<std::mutex> lock(mutex);
-            cv.wait(lock, [&] {return !queue.empty() || producer_done; });
-            if (producer_done && queue.empty()) {
-                break;
-            }
-            auto batch = queue.front();
-            queue.pop();
-            lock.unlock();
-            //batch.contiguous();
-            co_yield batch;
-        }
-    }
-
     auto read_lines_maxi_batched(const std::vector<std::string>& data_paths,
         size_t maxi_batch_size) -> Generator<vector2d<std::string>> {
         auto rows = read_lines(data_paths);  // generator<vector<string>>
@@ -404,7 +352,7 @@ namespace tahoma::data {
 
 
 
-    auto DataLoader::get_data_async_new(std::string dataset_name, i32 num_threads) -> Generator<data::Batch> {
+    auto DataLoader::get_data_async(std::string dataset_name, i32 num_threads) -> Generator<data::Batch> {
 
         auto data_paths = config[dataset_name]["data"].as<std::vector<std::string>>();
         auto mini_batch = config[dataset_name]["mini_batch"].as<size_t>();
@@ -417,7 +365,7 @@ namespace tahoma::data {
         File reading is done on a single thread
         the rest of work is done on multiple worker threads
         */
-
+       
         std::mutex mutex;
         std::condition_variable cv;
 

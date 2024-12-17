@@ -13,3 +13,8 @@ __pycache__/
 .vscode/settings.json
 tmp/
 runs/
+*.tar
+*.tgz
+*.tar.gz
+*.gz
+*.zip

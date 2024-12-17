@@ -1,7 +1,6 @@
 // unit tests for tahoma
 // created by TG; circa 2024 fall-winter
 //
-#define BACKWARD_HAS_DW 1
 #include <iostream>
 
 #include "test_data_loader.cpp"

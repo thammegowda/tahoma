@@ -86,7 +86,6 @@ namespace tahoma::data {
         auto get_samples(std::vector<std::string> data_paths, i32 num_samples) -> data::Batch;
         auto get_data_sync(std::string dataset_name, std::string fallback_name="trainer") -> Generator<data::Batch>;
         auto get_data_async(std::string dataset_name, i32 num_threads) -> Generator<data::Batch>;
-        auto get_data_async_new(std::string dataset_name, i32 num_threads) -> Generator<data::Batch>;
     };
 
 
