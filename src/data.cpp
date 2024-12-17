@@ -139,12 +139,15 @@ namespace tahoma::data {
         for (auto fields : rows) {
             if (num_fields < 0) {
                 num_fields = fields.size(); // initialize on first run
+                if (num_fields == 0 ||  num_fields > vocabs.size()) {
+                    throw std::runtime_error(fmt::format("Number of fields must be > 0 and should not exceed the number of vocabs. num_fields: {}, vocabs: {}", num_fields, vocabs.size()));
+                }
                 if (max_length_crop) {
+                    spdlog::debug("Length cropping is enabled. max_length: {}; num_fields: {}", fmt::join(max_lengths, ", "), num_fields);
                     if (max_lengths.size() != num_fields) {
                         throw std::runtime_error(fmt::format("max_length must be of the same size as data_paths. \
                                 max_lengths: {}, num_fields: {}", max_lengths.size(), num_fields));
                     }
-                    spdlog::debug("Length cropping is enabled. max_length: {}", fmt::join(max_lengths, ", "));
                 }
             }
             if (fields.size() != num_fields) {
@@ -379,19 +382,24 @@ namespace tahoma::data {
     }
 
     auto read_lines_maxi_batched(const std::vector<std::string>& data_paths,
-        i32 maxi_batch_size) -> Generator<vector2d<std::string>> {
+        size_t maxi_batch_size) -> Generator<vector2d<std::string>> {
         auto rows = read_lines(data_paths);  // generator<vector<string>>
-        vector2d<std::string> buffer(maxi_batch_size);
+        vector2d<std::string> buffer;
         for (auto& line : rows) {
+            if (line.empty()) {
+                spdlog::warn("Empty row found. Skipping");
+                continue;
+            }
             buffer.push_back(line);
             if (buffer.size() >= maxi_batch_size) {
                 co_yield buffer;
-                buffer.clear();
+                buffer = vector2d<std::string>();
             }
         }
         if (!buffer.empty()) {
             co_yield buffer;
         }
+        spdlog::info("read_lines_maxi_batched done; reached the end of files");
     };
 
 
@@ -399,8 +407,8 @@ namespace tahoma::data {
     auto DataLoader::get_data_async_new(std::string dataset_name, i32 num_threads) -> Generator<data::Batch> {
 
         auto data_paths = config[dataset_name]["data"].as<std::vector<std::string>>();
-        auto mini_batch = config[dataset_name]["mini_batch"].as<i32>();
-        auto maxi_batch = config[dataset_name]["maxi_batch"].as<i32>(1);
+        auto mini_batch = config[dataset_name]["mini_batch"].as<size_t>();
+        auto maxi_batch = config[dataset_name]["maxi_batch"].as<size_t>(1);
         auto max_length_crop = config[dataset_name]["max_length_crop"].as<bool>(true);
         auto max_length = config[dataset_name]["max_length"].as<vector<size_t>>();
         auto maxi_batch_size = maxi_batch * mini_batch;
@@ -441,7 +449,10 @@ namespace tahoma::data {
                     std::unique_lock<std::mutex> lock(mutex);
                     cv.wait(lock, [&] { return maxi_batch_queue.size() < max_queue_size; });
                     maxi_batch_queue.push(maxi_batch);
-                    spdlog::info("reader_thread maxi_batch_count: {}", count++);
+                    count++;
+                    spdlog::debug("reader_thread maxi_batch_count: {}", count);
+                    lock.unlock();
+                    cv.notify_one();
                 }
             }
             { // scope for lock
@@ -469,9 +480,9 @@ namespace tahoma::data {
                 auto maxi_batch = maxi_batch_queue.front();
                 maxi_batch_queue.pop();
                 lock.unlock();
-                spdlog::info("worker {}: maxi_batch_count: {}", worker_id, count);
-
-                auto examples = read_examples(vector_to_generator<>(maxi_batch), max_length, max_length_crop);
+                spdlog::debug("worker {}: maxi_batch_count: {} maxi_batch_size: {}", worker_id, count, maxi_batch.size());
+                auto maxi_gen = vector_to_generator<vector<std::string>>(std::move(maxi_batch));
+                auto examples = read_examples(std::move(maxi_gen), max_length, max_length_crop);
                 auto examples_shufd = buffered_shuffle(examples, mini_batch * maxi_batch_size);
                 auto batches = make_batches(examples_shufd, mini_batch);
                 for (auto& batch : batches) {
@@ -484,7 +495,7 @@ namespace tahoma::data {
                 {
                     std::unique_lock<std::mutex> lock(mutex);
                     status.n_workers_done++;
-                    spdlog::info("Worker done: {}", status.n_workers_done);
+                    spdlog::debug("Worker done: {}", status.n_workers_done);
                 }
             }
             };
@@ -563,7 +574,7 @@ namespace tahoma::data {
                 }
             }
 
-            if (has_data) {
+            if (has_data && !fields.empty()) {
                 co_yield fields;
             }
         } while (has_data);
