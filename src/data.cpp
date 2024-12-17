@@ -167,7 +167,7 @@ namespace tahoma::data {
 
     // TODO: read_examples with multiple threads
     auto DataLoader::read_examples(std::vector<str> data_paths,
-        std::vector<size_t> max_lengths, bool max_length_crop, int num_threads)
+        std::vector<size_t> max_lengths, bool max_length_crop, size_t num_threads)
         -> Generator<data::Example> {
 
         std::vector<i32> eos_ids = {};
@@ -264,19 +264,14 @@ namespace tahoma::data {
     }
 
     auto DataLoader::get_train_data(size_t n_data_threads) -> Generator<data::Batch> {
-        if (n_data_threads > 0) {
-            spdlog::warn("Async data loading is not complete yet. Using single thread");
-            n_data_threads = 0; // FIXME: remove this line
-        }
-        if (n_data_threads > 1) { // asynchronous, on a separate thread
+        if (n_data_threads >= 1) { // asynchronous, on a separate thread
             spdlog::debug("Using async loader with {} data threads", n_data_threads);
-            // TODO: support multiple threads
             return get_data_async("trainer", n_data_threads);
-        } else if (n_data_threads == 0) { // synchronous, on the same thread
+        } else if (n_data_threads == 0 ) { // synchronous, on the same thread
             spdlog::debug("Data loading on the main thread");
             return get_data_sync("trainer");
         } else {
-            throw std::runtime_error("n_data_threads must be >= 1");
+            throw std::runtime_error("n_data_threads must be >= 0; given " + n_data_threads);
         }
     }
 
@@ -284,7 +279,7 @@ namespace tahoma::data {
         return get_data_sync("validator", "trainer");
     }
 
-    auto DataLoader::get_samples(std::vector<std::string> data_paths, i32 num_samples) -> data::Batch {
+    auto DataLoader::get_samples(std::vector<std::string> data_paths, size_t num_samples) -> data::Batch {
         assert(num_samples > 0);
         vector2d<std::string> buffer;
         for (auto line : read_lines(data_paths)) {
@@ -352,7 +347,7 @@ namespace tahoma::data {
 
 
 
-    auto DataLoader::get_data_async(std::string dataset_name, i32 num_threads) -> Generator<data::Batch> {
+    auto DataLoader::get_data_async(std::string dataset_name, size_t num_threads) -> Generator<data::Batch> {
 
         auto data_paths = config[dataset_name]["data"].as<std::vector<std::string>>();
         auto mini_batch = config[dataset_name]["mini_batch"].as<size_t>();
@@ -536,7 +531,7 @@ namespace tahoma::data {
 
 
     template <typename T>
-    auto sample_n_items(const std::vector<T>& buffer, i32 n) -> std::vector<T> {
+    auto sample_n_items(const std::vector<T>& buffer, size_t n) -> std::vector<T> {
         std::vector<T> samples = buffer; // copy the original vector
         std::random_device rd;
         std::mt19937 g(rd());

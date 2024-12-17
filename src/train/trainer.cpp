@@ -209,8 +209,9 @@ namespace tahoma::train {
             auto stats = StatsCounter(log_frequency, /*name=*/"Training", /*log_first=*/log_first);
             size_t n_skips = 0;
             size_t MAX_BAD_SKIPS = 5;
+            size_t n_data_threads = _config["trainer"]["data_threads"].as<size_t>(1);
             for (i32 epoch = 0; epoch < num_epochs; epoch++) {
-                for (auto batch : _data_loader.get_train_data()) {
+                for (auto batch : _data_loader.get_train_data(n_data_threads)) {
                     try {
                         step(batch, stats, Mode::TRAINING);
                         n_skips = 0;

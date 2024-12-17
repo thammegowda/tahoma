@@ -76,26 +76,26 @@ namespace tahoma::data {
         auto output_vocab() -> std::shared_ptr<sentencepiece::SentencePieceProcessor>;
         auto make_example(std::vector<std::string> fields, vector<i32> eos_ids, std::vector<size_t> max_lengths, bool max_length_crop=true) -> data::Example;
         auto read_examples(Generator<std::vector<std::string>> rows, std::vector<size_t> max_lengths, bool max_length_crop=true) -> Generator<data::Example>;
-        auto read_examples(std::vector<std::string> data_paths, std::vector<size_t> max_lengths, bool max_length_crop=true, i32 num_threads=1) -> Generator<data::Example>;
+        auto read_examples(std::vector<std::string> data_paths, std::vector<size_t> max_lengths, bool max_length_crop=true, size_t num_threads=1) -> Generator<data::Example>;
 
         //template <typename T>
         auto buffered_shuffle(Generator<data::Example>& examples, size_t buffer_size) -> Generator<data::Example>;
         auto make_batches(Generator<data::Example>& examples, size_t batch_size, bool contiguous = false) -> Generator<data::Batch>;
         auto get_train_data(size_t n_data_threads=1) -> Generator<data::Batch>;
         auto get_validation_data() -> Generator<data::Batch>;
-        auto get_samples(std::vector<std::string> data_paths, i32 num_samples) -> data::Batch;
+        auto get_samples(std::vector<std::string> data_paths, size_t num_samples) -> data::Batch;
         auto get_data_sync(std::string dataset_name, std::string fallback_name="trainer") -> Generator<data::Batch>;
-        auto get_data_async(std::string dataset_name, i32 num_threads) -> Generator<data::Batch>;
+        auto get_data_async(std::string dataset_name, size_t num_threads) -> Generator<data::Batch>;
     };
 
 
     template <typename T>
-    auto sample_n_items(const std::vector<T>& buffer, i32 n) -> std::vector<T>;
+    auto sample_n_items(const std::vector<T>& buffer, size_t n) -> std::vector<T>;
 
     auto tensor_shape(Tensor tensor) -> std::string;
 
     template <typename T>
-    auto sample_n_items_stream(Generator<T>& stream, i32 n) -> Generator<T> {
+    auto sample_n_items_stream(Generator<T>& stream, size_t n) -> Generator<T> {
         // buffer -> sample -> yield
         std::vector<std::vector<std::string>> buffer;
         for (auto item : stream) {
