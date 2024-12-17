@@ -1,5 +1,4 @@
 #pragma once
-//#define BACKWARD_HAS_UNWIND 1
 
 #include <iostream>
 #include <filesystem>

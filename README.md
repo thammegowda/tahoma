@@ -33,7 +33,8 @@ sudo apt install gcc-12 g++-12 cmake build-essential pkg-config libgoogle-perfto
 
 # Using backwards-cpp to get debug stacktrace on crashes/exceptions
 # And we need these for backwards-cpp to work
-sudo apt install libdw-dev libunwind-dev
+sudo apt install libdw-dev
+#sudo apt install libdwarf-dev
 ```
 
 > TODO: update the exact set of libs and lower bound on versions to support C++20

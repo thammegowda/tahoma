@@ -10,6 +10,11 @@ set (CMAKE_CUDA_STANDARD 20)
 set (CMAKE_CUDA_STANDARD_REQUIRED ON)
 set (CMAKE_COLOR_DIAGNOSTICS ON)  # colored output
 
+# see https://github.com/bombela/backward-cpp?tab=readme-ov-file#libraries-to-read-the-debug-info
+set (BACKWARD_HAS_DW on)
+#set (BACKWARD_HAS_BFD on)
+#set (BACKWARD_HAS_DWARF on)
+
 # set options with default values
 option(USE_CCACHE "Use ccache compiler cache (https://ccache.dev)" ON)
 option(USE_CUDA "Use CUDA libtorch. Default is CPU only libtorch" OFF)
@@ -30,7 +35,7 @@ endif()
 
 if(CMAKE_BUILD_TYPE MATCHES Debug)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -ggdb3 -O0")
-    message(STATUS "Debug build. Flags set to retain most debug info and disable all optimizations")
+    message(STATUS "CMAKE_BUILD_TYPE=Debug. Flags set to retain most debug info while disabling all optimizations")
 endif()
 
 # run git submodule update --init --recursive
