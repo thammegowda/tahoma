@@ -132,7 +132,6 @@ namespace tahoma::tests {
         auto n_data_threads = 0;
         auto batches = data_loader.get_train_data(n_data_threads);
 
-        /////
         size_t batch_count = 0;
         size_t max_batches = 2'000;
         auto counter = tahoma::train::StatsCounter();

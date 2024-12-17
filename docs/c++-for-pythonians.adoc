@@ -8,23 +8,27 @@ The language has evolved a lot over the years, and the latest versions have a lo
 At the time of writing, C++23 seems to be the latest, stable-enough version. C++26 is in the works, but it will take some time before it is widely adopted.
 
 
-*. Learn new C++ (e.g. C++23) features. Forget the old ways when you can.
-*. Dont collide namespaces. Use `using namespace std;` only in small programs. For larger programs, use `std::` prefix instead of colliding namespaces.
-*. Use `auto` keyword to let the compiler deduce the type of the variable. This makes the code more readable and less error-prone
-*. Use `nullptr` instead of `NULL` or `0`. `nullptr` is a pointer literal that can be converted to any pointer type.
-*. Use modern memory management techniques like `std::unique_ptr`, `std::shared_ptr`, and `std::weak_ptr` instead of raw pointers.
-*. Use `std::generator` instead of raw iterators. Beware, you cannot create a generator on one thread and use it from another thread. Create and use it on the same thread whenever possible.
-*. Learn about lvalue and rvalue.
-*. Careful while reusing variable names. Sometimes, it can lead to unexpected results. Example, the caller of one function may have bound the variable name to a reference, and the callee may change the reference to point to a different object.
+* Learn new C++ (e.g. C++23) features. Forget the old ways when you can.
+* Dont collide namespaces. Use `using namespace std;` only in small programs. For larger programs, use `std::` prefix instead of colliding namespaces.
+* Use `auto` keyword to let the compiler deduce the type of the variable. This makes the code more readable and less error-prone
+* Use `nullptr` instead of `NULL` or `0`. `nullptr` is a pointer literal that can be converted to any pointer type.
+* Use modern memory management techniques like `std::unique_ptr`, `std::shared_ptr`, and `std::weak_ptr` instead of raw pointers.
+* Use `std::generator` instead of raw iterators (see co_yield). Generators are a great way to avoid the complexity of managing iterators.
+    ** Generators are powered by coroutines. For simplicity, assume coroutines are paused and resumed several times.Coroutines have some limitations.
+    ** Caution: you cannot (atleast, I couldn't) create a generator on one thread and use it from another thread. Create and use it on the same thread whenever possible.
+    ** Forwarding generators is a bit tricky. If you built generator in another utility function, you may need to for-each loop over the generator and yield the values.
+
+* Learn about lvalue and rvalue.
+* Careful while reusing variable names. Sometimes, it can lead to unexpected results. Example, the caller of one function may have bound the variable name to a reference, and the callee may change the reference to point to a different object.
 *. Dont put functional code in assert statements. They may be removed in release builds.
   It maybe okay  `assert do_work() == STATUS_OK, "Work Failed"` in python, but not in C++.
-*. `gdb` (or such debuggers) is your friend. Learn to use it. It can be a bit intimidating at first, but it is a very powerful tool. 
+* `gdb` (or such debuggers) is your friend. Learn to use it. It can be a bit intimidating at first, but it is a very powerful tool. 
   If your program crashes, `gdb --args ./build/myprogram arg1 arg2` will help you find the problem. Look for GDB cheat sheets online.
   useful shortcuits: `bt` (backtrace), `p var` (print variable), `c` (continue), `n` (next), `s` (step), `q` (quit). `info locals` (print local variables), `info args` (print function arguments).
 
-*. Debugging libtorch code can also be intimidating at first. But, it is worth learning. Some useful tips:
-  * `p tensor.print()` to print the tensor type and shape.
-  * ``ptensor tensor`` to print the tensor values, where ptensor is a user-defined command in `.gdbinit` file at the root of the project. gdb might not load the `.gdbinit` file by default due to security reasons. Look for warnings when you start gdb. One fix is to add the following line to your gdbinit file: `add-auto-load-safe-path /`. 
+* Debugging libtorch code can also be intimidating at first. But, it is worth learning. Some useful tips:
+   * `p tensor.print()` to print the tensor type and shape.
+   * ``ptensor tensor`` to print the tensor values, where ptensor is a user-defined command in `.gdbinit` file at the root of the project. gdb might not load the `.gdbinit` file by default due to security reasons. Look for warnings when you start gdb. One fix is to add the following line to your gdbinit file: `add-auto-load-safe-path /`. 
 
-*. 
+*
 

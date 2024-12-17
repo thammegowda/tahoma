@@ -30,14 +30,6 @@ namespace tahoma::data {
         return os;
     }
 
-    /*
-    std::ostream& Example::operator<<(std::ostream& os, const Example& example) {
-        return os << "Example(" << example.id << "; fields(" <<
-            example.fields.size() << "): " << example.fields
-            << "; ids: (" << example.field_ids.size() << "))";
-    }
-    */
-
     // struct Batch {
 
     Batch::Batch(std::vector<Example> examples, bool contiguous)
@@ -252,12 +244,15 @@ namespace tahoma::data {
     auto DataLoader::make_batches(Generator<data::Example>& examples, size_t batch_size,
         bool contiguous) -> Generator<data::Batch> {
         // TODO: buffer and batch equal length examples to reduce padding
-        vector<data::Example> buffer;
-        for (auto& ex : examples) {
+        if (batch_size == 0) {
+            throw std::runtime_error("batch_size must be > 0");
+        }
+        auto buffer = std::vector<data::Example>();
+        for (auto ex : examples) {
             buffer.push_back(ex);
             if (buffer.size() >= batch_size) {
                 co_yield data::Batch(buffer, contiguous);
-                buffer = vector<data::Example>();
+                buffer.clear();
             }
         }
         if (!buffer.empty()) {
@@ -274,12 +269,10 @@ namespace tahoma::data {
             spdlog::debug("Using async loader with {} data threads", n_data_threads);
             // TODO: support multiple threads
             return get_data_async("trainer", n_data_threads);
-        }
-        else if (n_data_threads == 0) { // synchronous, on the same thread
+        } else if (n_data_threads == 0) { // synchronous, on the same thread
             spdlog::debug("Data loading on the main thread");
             return get_data_sync("trainer");
-        }
-        else {
+        } else {
             throw std::runtime_error("n_data_threads must be >= 1");
         }
     }
@@ -322,13 +315,15 @@ namespace tahoma::data {
         spdlog::info("mini_batch: {}, maxi_batch: {}", mini_batch, maxi_batch);
         spdlog::info("max_length_crop: {}, max_length: {}", max_length_crop, fmt::join(max_length, ", "));
 
-        //auto examples = read_examples(data_paths, max_length, max_length_crop);
-        //auto examples_shufd = buffered_shuffle(examples, mini_batch * maxi_batch);
-        //return make_batches(examples_shufd, mini_batch);
-
         auto examples = read_examples(data_paths, max_length, max_length_crop);
         auto examples_shufd = buffered_shuffle(examples, mini_batch * maxi_batch);
-        return make_batches(examples_shufd, mini_batch);
+        auto batches = make_batches(examples_shufd, mini_batch);
+        // CAUTION: direct return of batches lead to segfault during coroutine resume
+        // we need to co_yield within this function to avoid destruction of coroutines stack 
+        // TODO: find a way to forward the generator without the for each co_yield 
+        for (auto batch : batches) {
+            co_yield batch;
+        }
     }
 
     auto DataLoader::get_data_async(std::string dataset_name, i32 num_threads) -> Generator<data::Batch> {
@@ -526,10 +521,6 @@ namespace tahoma::data {
         spdlog::info("All workers done");
     }
 
-
-
-
-    // }; // end of DataLoader
 
     auto read_lines(std::string path) -> Generator<std::string> {
         /**
