@@ -41,7 +41,7 @@ int main(int argc, char* argv[]) {
     predict_cmd.add_argument("-bs", "--batch-size")
         .scan<'d', int>()
         .help("Batch Size")
-        .default_value("1");
+        .default_value(1);
 
     predict_cmd.add_argument("-qe", "--qe")
         .help("Quality Estimation model")
