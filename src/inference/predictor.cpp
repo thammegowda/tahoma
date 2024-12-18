@@ -37,11 +37,11 @@ namespace tahoma::inference {
             };
 
 
-        auto consume_buffer = [&](vector2d<string> buffer) -> void {
+        auto consume_buffer = [&](vector<data::IdRawExample> buffer) -> void {
             // consume buffer
             vector<data::Example> examples;
-            for (auto& line : buffer) {
-                auto example = loader.make_example(line, eos_ids, max_lens, /*max_length_crop=*/true);
+            for (auto& [id, fields] : buffer) {
+                auto example = loader.make_example(id,  fields, eos_ids, max_lens, /*max_length_crop=*/true);
                 examples.push_back(example);
             }
             auto batch = data::Batch(examples, /*contiguous=*/true);
@@ -55,11 +55,13 @@ namespace tahoma::inference {
             auto width = 6;
             auto scores = std::any_cast<torch::Tensor>(out["result"]);
             for (int i = 0; i < scores.size(0); ++i) {
-                std::cout << fmt::format("{:.{}f}", scores[i].item<float>(), width) << "\t" << examples[i].fields[0] << std::endl;
+                auto ex = examples[i];
+                std::cout << fmt::format("{:.{}f}", scores[i].item<float>(), width) << "\t" << ex.id << "\t" << ex.fields[0] << std::endl;
             }
             };
 
-        vector2d<string> buffer;
+        vector<data::IdRawExample> buffer;
+        size_t rec_num = 0;
         for (auto& line : lines) {
             auto parts = utils::split(line, "\t");
             size_t expected_fields = is_qe ? 2 : 3;
@@ -74,8 +76,8 @@ namespace tahoma::inference {
             if (!is_qe) {
                 example["reference"] = parts[2];
             }
-            auto input_line = regression_model->make_input(example, is_qe);
-            buffer.push_back({ input_line });
+            auto input_field = regression_model->make_input(example, is_qe);
+            buffer.push_back({++rec_num, {input_field}});   // pair<size_t, vector<string>>
             if (buffer.size() >= batch_size) {
                 consume_buffer(buffer);
                 buffer.clear();
@@ -111,10 +113,10 @@ namespace tahoma::inference {
             return x.eq(PAD_ID).unsqueeze(1).unsqueeze(2).to(torch::kBool).to(x.device());
             };
 
-        auto consume_buffer = [&](vector2d<string> buffer) -> void {
+        auto consume_buffer = [&](vector<data::IdRawExample> buffer) -> void {
             vector<data::Example> examples;
-            for (auto& line : buffer) {
-                auto example = loader.make_example(line, eos_ids, max_lens, /*max_length_crop=*/true);
+            for (auto& [id, fields] : buffer) {
+                auto example = loader.make_example(id, fields, eos_ids, max_lens, /*max_length_crop=*/true);
                 examples.push_back(example);
             }
             auto batch = data::Batch(examples, /*contiguous=*/true);
@@ -129,18 +131,20 @@ namespace tahoma::inference {
                 i64* out_seq = tgt_seq_ids[i].cpu().to(torch::kInt64).data_ptr<i64>();
                 auto out_seq_vec = vector<int>(out_seq, out_seq + tgt_seq_ids[i].size(0));
                 std::cerr << "out_seq_vec: " << out_seq_vec << std::endl;
-                string out_seq_str = tgt_vocab->DecodeIds(out_seq_vec);
-                std::cout << buffer[i][0] << "\t->\t" << out_seq_str << std::endl;
+                string src_str = buffer[i].second[0];
+                string out_str = tgt_vocab->DecodeIds(out_seq_vec);
+                std::cout << src_str << "\t->\t" << out_str << std::endl;
             }
             };
 
-        vector2d<string> buffer;
+        vector<data::IdRawExample> buffer;
+        size_t rec_num = 0;
         for (auto& line : lines) {
             auto parts = utils::split(line, "\t");
             if (parts.size() < 1) {
                 throw std::runtime_error("Invalid input line: " + line + " Expected at least 1 field but got " + std::to_string(parts.size()));
             }
-            buffer.push_back({ parts[0] });
+            buffer.push_back({++rec_num, { parts[0] }});
             if (buffer.size() >= batch_size) {
                 consume_buffer(buffer);
                 buffer.clear();

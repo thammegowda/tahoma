@@ -18,13 +18,15 @@ namespace tahoma::data {
         }
     }
 
+    using RawExample = std::vector<std::string>;
+    using IdRawExample = std::pair<size_t, RawExample>;
     struct Example {
-        i64 id;
+        size_t id;
         vector<str> fields;
         vector2d<i32> field_ids;
 
         ~Example() = default;
-        Example(i64 id, vector<str> fields, vector2d<i32> field_ids)
+        Example(size_t id, vector<str> fields, vector2d<i32> field_ids)
             : id(id), fields(fields), field_ids(field_ids) {}
 
         //copy ctr
@@ -74,18 +76,18 @@ namespace tahoma::data {
         ~DataLoader() = default;
 
         auto output_vocab() -> std::shared_ptr<sentencepiece::SentencePieceProcessor>;
-        auto make_example(std::vector<std::string> fields, vector<i32> eos_ids, std::vector<size_t> max_lengths, bool max_length_crop=true) -> data::Example;
-        auto read_examples(Generator<std::vector<std::string>> rows, std::vector<size_t> max_lengths, bool max_length_crop=true) -> Generator<data::Example>;
+        auto make_example(size_t id, RawExample fields, vector<i32> eos_ids, std::vector<size_t> max_lengths, bool max_length_crop=true) -> data::Example;
+        auto read_examples(Generator<IdRawExample> rows, std::vector<size_t> max_lengths, bool max_length_crop=true) -> Generator<data::Example>;
         auto read_examples(std::vector<std::string> data_paths, std::vector<size_t> max_lengths, bool max_length_crop=true, size_t num_threads=1) -> Generator<data::Example>;
 
         //template <typename T>
-        auto buffered_shuffle(Generator<data::Example>& examples, size_t buffer_size) -> Generator<data::Example>;
-        auto make_batches(Generator<data::Example>& examples, size_t batch_size, bool contiguous = false) -> Generator<data::Batch>;
-        auto get_train_data(size_t n_data_threads=1) -> Generator<data::Batch>;
-        auto get_validation_data() -> Generator<data::Batch>;
-        auto get_samples(std::vector<std::string> data_paths, size_t num_samples) -> data::Batch;
-        auto get_data_sync(std::string dataset_name, std::string fallback_name="trainer") -> Generator<data::Batch>;
-        auto get_data_async(std::string dataset_name, size_t num_threads) -> Generator<data::Batch>;
+        auto buffered_shuffle(Generator<Example>& examples, size_t buffer_size) -> Generator<Example>;
+        auto make_batches(Generator<Example>& examples, size_t batch_size, bool contiguous = false) -> Generator<Batch>;
+        auto get_train_data(size_t n_data_threads=1) -> Generator<Batch>;
+        auto get_validation_data() -> Generator<Batch>;
+        auto get_samples(std::vector<std::string> data_paths, size_t num_samples) -> Batch;
+        auto get_data_sync(std::string dataset_name, std::string fallback_name="trainer") -> Generator<Batch>;
+        auto get_data_async(std::string dataset_name, size_t num_threads) -> Generator<Batch>;
     };
 
 
