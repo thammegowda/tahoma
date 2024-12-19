@@ -18,6 +18,7 @@ namespace tahoma::utils {
 
     auto restore_model(const std::string& model_path, torch::Device& device, bool validate_config=true) 
         -> std::pair<config::Config, std::shared_ptr<model::LanguageModel>>;
+    auto load_checkpt(const std::string& model_path, bool validate_config) -> std::pair<config::Config, Pack>;
 
     auto init_criterion(const YAML::Node& config, i64 ignore_idx) -> nn::AnyModule;
 

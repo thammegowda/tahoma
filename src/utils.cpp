@@ -23,19 +23,19 @@ using namespace tahoma;
 namespace tahoma::utils {
 
     auto init_model(config::Config& config, torch::Device& device) -> std::shared_ptr<model::LanguageModel> {
-        auto model_type = config["model"]["name"].as<std::string>();
+        auto model_name = config["model"]["name"].as<std::string>();
         YAML::Node model_args = config["model"]["args"];
         std::shared_ptr<model::LanguageModel> model;
-        if (model_type == "transformer_nmt") {
+        if (model_name == "transformer_nmt") {
             model = std::make_shared<model::TransformerNMTImpl>(model_args);
-        } else if (model_type == "transformer_lm") {
+        } else if (model_name == "transformer_lm") {
             model = std::make_shared<model::TransformerLMImpl>(model_args);
-        } else if (model_type == "MT5ForRegression") {
+        } else if (model_name == "MT5ForRegression") {
             model = std::make_shared<model::metricx::RegressionImpl>(model_args);
-        } else if (model_type == "MT5ForConditionalGeneration") {
+        } else if (model_name == "MT5ForConditionalGeneration") {
             model = std::make_shared<model::mt5::ConditionalGenerationImpl>(model_args);
         } else {
-            throw std::runtime_error("Unknown model type " + model_type);
+            throw std::runtime_error("Unknown model type " + model_name);
         }
         // NOTE: trying to move model to device here causes error. Not sure why.
         //LOG::info("Device: {}", device == torch::kCPU ? "CPU" : "CUDA");
@@ -43,14 +43,19 @@ namespace tahoma::utils {
         return model;
     }
 
-    auto restore_model(const std::string& model_path, torch::Device& device, bool validate_config)
-        -> std::pair<config::Config, std::shared_ptr<model::LanguageModel>> {
-        auto chkpt_state = serialize::load_npz(model_path);
-        if (chkpt_state.find("config.yml") == chkpt_state.end()) {
+    auto load_checkpt(const std::string& model_path, bool validate_config) -> std::pair<config::Config, Pack> {
+        auto chkpt_state = serialize::load_npz(model_path, torch::kCPU);
+        if (!chkpt_state.contains("config.yml")) {
             throw std::runtime_error("config.yml not found in the model file");
         }
         auto config_str = std::any_cast<std::string>(chkpt_state["config.yml"]);
         auto config = config::Config(YAML::Load(config_str), validate_config);
+        return std::make_pair(config, chkpt_state);
+    }
+
+    auto restore_model(const std::string& model_path, torch::Device& device, bool validate_config)
+        -> std::pair<config::Config, std::shared_ptr<model::LanguageModel>> {
+        auto [config, chkpt_state] = load_checkpt(model_path, validate_config);
         auto model = init_model(config, device);
         if (chkpt_state.empty()) {
             spdlog::warn("No checkpoint state found, model is initialized with random weights");
@@ -60,6 +65,7 @@ namespace tahoma::utils {
         }
         return std::make_pair(config, model);
     }
+
 
     auto init_criterion(const YAML::Node& config, i64 ignore_idx) -> nn::AnyModule {
         auto name = config["name"].as<std::string>("cross_entropy");

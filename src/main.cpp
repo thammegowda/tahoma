@@ -30,7 +30,7 @@ int main(int argc, char* argv[]) {
     predict_cmd.add_argument("-m", "--model")
         .help("Path to model")
         .required();
-    predict_cmd.add_argument("-v", "--vocab")
+    predict_cmd.add_argument("-v", "--vocabs")
         .help("Paths to vocabulary files")
         .nargs(argparse::nargs_pattern::at_least_one)
         .required();
@@ -92,14 +92,15 @@ int main(int argc, char* argv[]) {
         trainer.train();
     } else if (parser.is_subcommand_used("predict")) {
         auto model_path = predict_cmd.get<std::string>("model");
-        auto vocab_paths = predict_cmd.get<std::vector<std::string>>("vocab");
+        auto vocab_paths = predict_cmd.get<std::vector<std::string>>("vocabs");
         auto input_file = predict_cmd.get<std::string>("input");
         Pack pred_args = {
             {"qe", predict_cmd.get<bool>("qe")},
             {"print_model", predict_cmd.get<bool>("print-model")},
-            {"batch_size", predict_cmd.get<int>("batch-size")}
+            {"batch_size", predict_cmd.get<int>("batch-size")},
+            {"vocab_paths", vocab_paths},
         };
-        inference::predict(model_path, vocab_paths, input_file, pred_args);
+        inference::predict(model_path, input_file, pred_args);
     } else {
         std::cerr << "Unknown command. Knwon commands: train, predict\n";
         std::cerr << parser;
