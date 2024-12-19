@@ -267,7 +267,8 @@ namespace tahoma::data {
         } else if (n_data_threads == 0) { // synchronous, on the same thread
             spdlog::debug("Data loading on the main thread");
             return get_data_sync("trainer");
-        } else {
+        }
+        else {
             throw std::runtime_error("n_data_threads must be >= 0; given " + n_data_threads);
         }
     }
@@ -373,7 +374,7 @@ namespace tahoma::data {
         for (auto maxi_batch : read_lines_maxi_batched(data_paths, maxi_batch_size)) {
             if (!input_mappers.empty()) {
                 // map input fields using input_mappers
-                for (auto &[id, ex] : maxi_batch) {
+                for (auto& [id, ex] : maxi_batch) {
                     for (size_t i = 0; i < std::min(ex.size(), input_mappers.size()); ++i) {
                         ex[i] = input_mappers[i]->map(ex[i]);
                     }
@@ -443,19 +444,7 @@ namespace tahoma::data {
             auto worker_thread = std::jthread(&MultiThreadedLoader::batching_task, this);
             all_threads.push_back(std::move(worker_thread));
         }
-        /*
-        reader_thread.join();
-        for (auto& thread : worker_threads) {
-            thread.join();
-        }
-        */
-        // NOTE: generator might stop reading anytime which result in thread termination
-        // if you terminate a thread without join or detach, you get "terminate called without an active exception"
-        // and the program crashes. So we detach the thread as we don't need to join it.
-        // Note2: our worker threads wait for the reader thread to finish (see reader_done and producer_done), so we don't need to join it.
-        //for (auto& thread : all_threads) {
-        //    thread.detach();
-        //}
+
     }
 
     auto MultiThreadedLoader::generator() -> Generator<Batch> {
@@ -494,9 +483,22 @@ namespace tahoma::data {
         }
         spdlog::debug("Loading data from {}", fmt::join(data_paths, ", "));
         const i32 num_fields = data_paths.size();
+        // check that atmost a single "-" is in data_paths
+        if (std::count(data_paths.begin(), data_paths.end(), "-") > 1) {
+            throw std::runtime_error("At most one '-' (i.e. STDIN) is allowed in data_paths");
+        }
         std::vector<std::ifstream> files(num_fields);
         for (size_t i = 0; i < num_fields; ++i) {
-            files[i].open(data_paths[i]);
+            string data_path = data_paths[i];
+            if (data_path == "-") {
+#ifdef _WIN32
+                // https://stackoverflow.com/a/4477381/1506477
+                data_path = "CON";
+#else
+                data_path = "/dev/stdin";
+#endif
+            }
+            files[i].open(data_path);
             if (!files[i]) {
                 throw std::runtime_error("Failed to open file " + data_paths[i]);
             }
