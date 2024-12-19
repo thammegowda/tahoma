@@ -15,6 +15,7 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/fmt/bundled/format.h>
 #include <spdlog/fmt/std.h>
+#include "spdlog/sinks/stdout_color_sinks.h"
 #include <torch/torch.h>
 
 
@@ -92,9 +93,11 @@ namespace tahoma {
     */
 
     inline int global_setup() {
-        spdlog::info("Global setup started");
+
+        spdlog::set_default_logger(spdlog::stderr_color_mt("console"));
         spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [t%t] [%^%l%$] %v");
         spdlog::set_level(spdlog::level::info);
+        spdlog::debug("Global setup started");
         backward::SignalHandling sh;
         return 0;
     }
