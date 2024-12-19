@@ -27,11 +27,13 @@ namespace tahoma::data {
 
         ~Example() = default;
         Example(size_t id, vector<str> fields, vector2d<i32> field_ids)
-            : id(id), fields(fields), field_ids(field_ids) {}
+            : id(id), fields(fields), field_ids(field_ids) {        
+}
 
         //copy ctr
         Example(const Example& other)
-            : id(other.id), fields(other.fields), field_ids(other.field_ids) {}
+            : id(other.id), fields(other.fields), field_ids(other.field_ids) {        
+}
 
         //copy assignment
         Example& operator=(const Example& other) {
@@ -43,7 +45,8 @@ namespace tahoma::data {
 
         // move ctr
         Example(Example&& other) noexcept :
-            id(other.id), fields(std::move(other.fields)), field_ids(std::move(other.field_ids)) {}
+            id(other.id), fields(std::move(other.fields)), field_ids(std::move(other.field_ids)) {
+        }
 
         //std::ostream& operator<<(std::ostream& os, const Example& example);
 
@@ -57,7 +60,7 @@ namespace tahoma::data {
 
         Batch(std::vector<Example> examples, bool contiguous = false);
         static auto to_tensors(std::vector<Example> examples) -> std::vector<torch::Tensor>;
-        void contiguous();
+        auto contiguous() -> Batch&;
         auto to(torch::Device& device) -> Batch&;
         auto size() -> i32;
         ~Batch() = default;
@@ -67,27 +70,117 @@ namespace tahoma::data {
         std::vector<std::shared_ptr<sentencepiece::SentencePieceProcessor>> vocabs;
         config::Config config;
 
-        DataLoader(config::Config config, std::vector<std::shared_ptr<sentencepiece::SentencePieceProcessor>> vocabs):
-            config(config), vocabs(vocabs) {}
+        DataLoader(config::Config config, std::vector<std::shared_ptr<sentencepiece::SentencePieceProcessor>> vocabs) :
+            config(config), vocabs(vocabs) {
+        }
 
-        DataLoader(config::Config config):
-            DataLoader(config, utils::load_vocabs(config["schema"]["vocabs"].as<vector<string>>())) {}
+        DataLoader(config::Config config) :
+            DataLoader(config, utils::load_vocabs(config["schema"]["vocabs"].as<vector<string>>())) {
+        }
 
         ~DataLoader() = default;
 
         auto output_vocab() -> std::shared_ptr<sentencepiece::SentencePieceProcessor>;
-        auto make_example(size_t id, RawExample fields, vector<i32> eos_ids, std::vector<size_t> max_lengths, bool max_length_crop=true) -> data::Example;
-        auto read_examples(Generator<IdRawExample> rows, std::vector<size_t> max_lengths, bool max_length_crop=true) -> Generator<data::Example>;
-        auto read_examples(std::vector<std::string> data_paths, std::vector<size_t> max_lengths, bool max_length_crop=true, size_t num_threads=1) -> Generator<data::Example>;
+        auto make_example(size_t id, RawExample fields, vector<i32> eos_ids, std::vector<size_t> max_lengths, bool max_length_crop = true) -> data::Example;
+        auto read_examples(Generator<IdRawExample> rows, std::vector<size_t> max_lengths, bool max_length_crop = true, bool add_eos = true) -> Generator<data::Example>;
+        auto read_examples(std::vector<std::string> data_paths, std::vector<size_t> max_lengths, bool max_length_crop = true, size_t num_threads = 1, bool add_eos = true) -> Generator<data::Example>;
 
         //template <typename T>
         auto buffered_shuffle(Generator<Example>& examples, size_t buffer_size) -> Generator<Example>;
         auto make_batches(Generator<Example>& examples, size_t batch_size, bool contiguous = false) -> Generator<Batch>;
-        auto get_train_data(size_t n_data_threads=1) -> Generator<Batch>;
+        auto get_train_data(size_t n_data_threads = 1) -> Generator<Batch>;
         auto get_validation_data() -> Generator<Batch>;
         auto get_samples(std::vector<std::string> data_paths, size_t num_samples) -> Batch;
-        auto get_data_sync(std::string dataset_name, std::string fallback_name="trainer") -> Generator<Batch>;
+        auto get_data_sync(std::string dataset_name, std::string fallback_name = "trainer") -> Generator<Batch>;
         auto get_data_async(std::string dataset_name, size_t num_threads) -> Generator<Batch>;
+    };
+
+
+    struct LineMapper {
+
+        virtual auto map(const std::string& line) -> std::string = 0;
+        
+        auto operator()(const std::string& line) -> std::string {
+            return map(line);
+        }
+    };
+
+    struct MultiThreadedLoader {
+        /*
+        File reading is done on a single thread
+        the rest of work is done on multiple worker threads
+        */
+
+        struct StatusContainer {
+            bool reader_done = false;
+            size_t n_workers_started = 0;
+            size_t n_workers_done = 0;
+
+            StatusContainer() = default;
+            StatusContainer(StatusContainer&&) = delete;
+            StatusContainer(const StatusContainer&) = delete;
+            StatusContainer& operator=(const StatusContainer&) = delete;
+
+            bool is_done() {
+                return reader_done && n_workers_started > 0 && n_workers_done == n_workers_started;
+            }
+        };
+
+        DataLoader& loader;
+        std::vector<std::string> data_paths;
+        size_t mini_batch;
+        size_t maxi_batch;
+        size_t maxi_batch_size;
+        bool max_length_crop;
+        std::vector<size_t> max_lengths;
+        bool add_eos = true;
+        StatusContainer status;
+
+        std::queue<vector<IdRawExample>> maxi_batch_queue;
+        std::queue<Batch> mini_batch_queue;
+        size_t max_queue_size = 32;
+        std::mutex mutex;
+        std::condition_variable cv;
+
+        std::vector<std::jthread> all_threads;
+
+        std::vector<Ptr<LineMapper>> input_mappers;
+
+
+        MultiThreadedLoader(DataLoader& loader, std::vector<std::string> data_paths, size_t mini_batch, size_t maxi_batch,
+            bool max_length_crop, std::vector<size_t> max_lengths, std::vector<Ptr<LineMapper>> input_mappers)
+            :
+            loader(loader),
+            data_paths(data_paths),
+            mini_batch(mini_batch),
+            maxi_batch(maxi_batch),
+            maxi_batch_size(maxi_batch* mini_batch),
+            max_length_crop(max_length_crop),
+            max_lengths(max_lengths),
+            input_mappers(input_mappers)
+        {}
+
+        MultiThreadedLoader(DataLoader& loader, YAML::Node config, std::vector<Ptr<LineMapper>> input_mappers) :
+            MultiThreadedLoader(loader,
+                config["data"].as<std::vector<std::string>>(),
+                config["mini_batch"].as<size_t>(),
+                config["maxi_batch"].as<size_t>(1),
+                config["max_length_crop"].as<bool>(false),
+                config["max_length"].as<std::vector<size_t>>(),
+                input_mappers)
+        {}
+
+        MultiThreadedLoader() = delete;
+        MultiThreadedLoader(MultiThreadedLoader&&) = delete;
+        MultiThreadedLoader(const MultiThreadedLoader&) = delete;
+        MultiThreadedLoader& operator=(const MultiThreadedLoader&) = delete;
+        ~MultiThreadedLoader();
+
+        void read_task();
+        void batching_task();
+        void start(size_t num_threads);
+        auto generator() -> Generator<Batch>;
+
     };
 
 

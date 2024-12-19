@@ -13,8 +13,10 @@ namespace tahoma::inference {
         bool is_qe = kwargs.get("qe", false);
         size_t width = kwargs.get("width", 6);
         size_t batch_size = kwargs.get("batch_size", 4);
+        size_t max_length = kwargs.get("max_length", 1024);
+        size_t data_threads = kwargs.get("data_threads", 4);
 
-        auto lines = utils::read_lines(file_name);
+
         assertm(model->task_type() == TaskType::REGRESSION, "Only regression models are supported for scoring");
         // TODO: support other models
         auto regression_model = std::dynamic_pointer_cast<model::metricx::RegressionImpl>(model);
@@ -30,61 +32,65 @@ namespace tahoma::inference {
         regression_model->eval();
         regression_model->to(device);
 
+        class MetricxLineMapper: public data::LineMapper {
+            tahoma::Ptr<model::metricx::RegressionImpl> regression_model;
+            bool is_qe;
 
-        auto make_mask = [&](const torch::Tensor& x) -> torch::Tensor {
-            // assume x is [BxT]; return [Bx1x1xT]; model requires 4D mask
-            return x.eq(PAD_ID).to(torch::kBool).to(x.device()).view({ x.size(0), 1, 1, x.size(1) });
-            };
-
-
-        auto consume_buffer = [&](vector<data::IdRawExample> buffer) -> void {
-            // consume buffer
-            vector<data::Example> examples;
-            for (auto& [id, fields] : buffer) {
-                auto example = loader.make_example(id,  fields, eos_ids, max_lens, /*max_length_crop=*/true);
-                examples.push_back(example);
+            public:
+            MetricxLineMapper(tahoma::Ptr<model::metricx::RegressionImpl> regression_model, bool is_qe)
+                : regression_model(regression_model), is_qe(is_qe) {}
+            
+            auto map(const std::string& line) -> std::string override {
+                auto parts = utils::split(line, "\t");
+                size_t expected_fields = is_qe ? 2 : 3;
+                if (parts.size() < expected_fields) {
+                    throw std::runtime_error("Invalid input line: " + line + " Expected at least "
+                        + std::to_string(expected_fields) + " fields but got " + std::to_string(parts.size()));
+                }
+                std::map<string, string> example = {
+                    {"source", parts[0]},
+                    {"candidate", parts[1]},
+                };
+                if (!is_qe) {
+                    example["reference"] = parts[2];
+                }
+                auto input_field = regression_model->make_input(example, is_qe);
+                return input_field;
             }
-            auto batch = data::Batch(examples, /*contiguous=*/true);
-            batch.to(device);
-            Pack inps = {
-                {"input", batch.fields[0]},
-                {"input_mask", make_mask(batch.fields[0])},
-            };
+        };
 
-            auto out = model->forward(inps);
-            auto width = 6;
+
+        std::vector<size_t> max_lengths = { max_length };
+        std::vector<Ptr<data::LineMapper>> input_mappers;
+        input_mappers.push_back(std::make_shared<MetricxLineMapper>(regression_model, is_qe));
+
+        auto mloader = data::MultiThreadedLoader(loader, {file_name}, batch_size, /*maxi_batch=*/1, /*max_length_crop=*/false, max_lengths, input_mappers);
+        mloader.add_eos = false; // EOS IDs should not be added. Google's code removes it from HF tokenizer's output
+        std::map<size_t, string> cache;
+
+        mloader.start(data_threads);
+        size_t idx = 1;
+        for (auto batch: mloader.generator()){
+            batch = batch.contiguous().to(device);
+            auto inps = batch.fields[0];
+            auto mask = inps.eq(PAD_ID).to(torch::kBool).to(device).view({ inps.size(0), 1, 1, inps.size(1) });
+            Pack inps_pack = {
+                {"input", inps},
+                {"input_mask", mask},
+            };
+            auto out = regression_model->forward(inps_pack);
             auto scores = std::any_cast<torch::Tensor>(out["result"]);
             for (int i = 0; i < scores.size(0); ++i) {
-                auto ex = examples[i];
-                std::cout << fmt::format("{:.{}f}", scores[i].item<float>(), width) << "\t" << ex.id << "\t" << ex.fields[0] << std::endl;
+                cache[batch.examples[i].id] = fmt::format("{:.{}f}", scores[i].item<float>(), width); // cache the score
             }
-            };
-
-        vector<data::IdRawExample> buffer;
-        size_t rec_num = 0;
-        for (auto& line : lines) {
-            auto parts = utils::split(line, "\t");
-            size_t expected_fields = is_qe ? 2 : 3;
-            if (parts.size() < expected_fields) {
-                throw std::runtime_error("Invalid input line: " + line + " Expected at least "
-                    + std::to_string(expected_fields) + " fields but got " + std::to_string(parts.size()));
-            }
-            std::map<string, string> example = {
-                {"source", parts[0]},
-                {"candidate", parts[1]},
-            };
-            if (!is_qe) {
-                example["reference"] = parts[2];
-            }
-            auto input_field = regression_model->make_input(example, is_qe);
-            buffer.push_back({++rec_num, {input_field}});   // pair<size_t, vector<string>>
-            if (buffer.size() >= batch_size) {
-                consume_buffer(buffer);
-                buffer.clear();
+            while (cache.contains(idx)) {
+                std::cout << cache[idx] << std::endl; // << "\t" << idx  
+                cache.erase(idx);
+                idx++;
             }
         }
-        if (!buffer.empty()) {
-            consume_buffer(buffer);
+        if (!cache.empty()) {
+            throw std::runtime_error("Cache is not empty; not all scores were printed");
         }
     }
 

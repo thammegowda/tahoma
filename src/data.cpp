@@ -71,17 +71,15 @@ namespace tahoma::data {
         return fields;
     }
 
-    void Batch::contiguous() {
+    auto Batch::contiguous() -> Batch& {
         /**
          * Convert vector of Examples to contiguous tensors with padding
          * The reason we do this on-demand: since batches are queued, we want to avoid filling up memory with padded tensors.
         */
-        if (fields.size() > 0) {
-            // already contiguous
-            return;
-        }
-        auto temp = to_tensors(examples);
-        fields.insert(fields.end(), temp.begin(), temp.end());
+        if (fields.size() == 0) {
+            fields = to_tensors(examples);
+        } // else already contiguous
+        return *this;
     }
 
     auto Batch::to(torch::Device& device) -> Batch& {
@@ -126,19 +124,20 @@ namespace tahoma::data {
         return Example(id, fields, field_ids);
     }
 
-    // read_examples with single thread
     auto DataLoader::read_examples(Generator<IdRawExample> rows,
-        std::vector<size_t> max_lengths, bool max_length_crop) -> Generator<Example> {
+        std::vector<size_t> max_lengths, bool max_length_crop, bool add_eos) -> Generator<Example> {
         i32 num_fields = -1;
         vector<i32> eos_ids = {};
-        // iterate through vocabs and get eos_id for each vocab
-        for (auto vocab : vocabs) {
-            eos_ids.push_back(vocab->eos_id());
+        if (add_eos) {
+            // iterate through vocabs and get eos_id for each vocab
+            for (auto vocab : vocabs) {
+                eos_ids.push_back(vocab->eos_id());
+            }
         }
         for (auto [row_id, fields] : rows) {
             if (num_fields < 0) {
                 num_fields = fields.size(); // initialize on first run
-                if (num_fields == 0 ||  num_fields > vocabs.size()) {
+                if (num_fields == 0 || num_fields > vocabs.size()) {
                     throw std::runtime_error(fmt::format("Number of fields must be > 0 and should not exceed the number of vocabs. num_fields: {}, vocabs: {}", num_fields, vocabs.size()));
                 }
                 if (max_length_crop) {
@@ -163,17 +162,17 @@ namespace tahoma::data {
         }
     }
 
-    // TODO: read_examples with multiple threads
     auto DataLoader::read_examples(std::vector<str> data_paths,
-        std::vector<size_t> max_lengths, bool max_length_crop, size_t num_threads)
+        std::vector<size_t> max_lengths, bool max_length_crop, size_t num_threads, bool add_eos)
         -> Generator<Example> {
 
         std::vector<i32> eos_ids = {};
-        // iterate through vocabs and get eos_id for each vocab
-        for (auto vocab : vocabs) {
-            eos_ids.push_back(vocab->eos_id());
+        if (add_eos) {
+            // iterate through vocabs and get eos_id for each vocab
+            for (auto vocab : vocabs) {
+                eos_ids.push_back(vocab->eos_id());
+            }
         }
-
         i32 num_fields = -1;
         size_t rec_num = 0;
         auto rows = read_lines(data_paths);
@@ -187,12 +186,13 @@ namespace tahoma::data {
                     spdlog::debug("Length cropping is enabled. max_length: {}", fmt::join(max_lengths, ", "));
                 }
             }
+            rec_num++;
             if (fields.size() != num_fields) {
                 spdlog::warn("All data files must have the same number of fields. \
                         Record number {} has {} fields, expected {}", rec_num, fields.size(), num_fields);
                 continue;
             }
-            auto example = make_example(++rec_num, fields, eos_ids, max_lengths, max_length_crop);
+            auto example = make_example(rec_num, fields, eos_ids, max_lengths, max_length_crop);
             bool skip = fields.empty() || example.field_ids.empty();
             if (skip) {
                 spdlog::warn("Skipping empty record {}", rec_num);
@@ -264,7 +264,7 @@ namespace tahoma::data {
         if (n_data_threads >= 1) { // asynchronous, on a separate thread
             spdlog::debug("Using async loader with {} data threads", n_data_threads);
             return get_data_async("trainer", n_data_threads);
-        } else if (n_data_threads == 0 ) { // synchronous, on the same thread
+        } else if (n_data_threads == 0) { // synchronous, on the same thread
             spdlog::debug("Data loading on the main thread");
             return get_data_sync("trainer");
         } else {
@@ -281,7 +281,7 @@ namespace tahoma::data {
         vector<IdRawExample> buffer;
         size_t rec_num = 1;
         for (auto line : read_lines(data_paths)) {
-            buffer.push_back({rec_num++, line});
+            buffer.push_back({ rec_num++, line });
         }
         auto samples = sample_n_items<IdRawExample>(buffer, num_samples);
         auto vector_to_generator = [&samples]() -> Generator<IdRawExample> {
@@ -322,17 +322,30 @@ namespace tahoma::data {
         }
     }
 
+
+    auto DataLoader::get_data_async(std::string dataset_name, size_t num_threads) -> Generator<Batch> {
+
+        auto loader = MultiThreadedLoader(*this, config[dataset_name], {});
+        loader.start(num_threads);
+
+        for (auto batch : loader.generator()) {
+            co_yield batch;
+        }
+        spdlog::info("All workers done");
+    }
+
     auto read_lines_maxi_batched(const std::vector<std::string>& data_paths,
         size_t maxi_batch_size) -> Generator<vector<IdRawExample>> {
         auto rows = read_lines(data_paths);  // generator<vector<string>>
         vector<IdRawExample> buffer;
-        size_t ln_num = 0;
+        size_t rec_num = 0;
         for (auto& line : rows) {
+            rec_num++;
             if (line.empty()) {
                 spdlog::warn("Empty row found. Skipping");
                 continue;
             }
-            buffer.push_back({ln_num, line});
+            buffer.push_back({ rec_num, line });
             if (buffer.size() >= maxi_batch_size) {
                 co_yield buffer;
                 buffer.clear();
@@ -344,196 +357,122 @@ namespace tahoma::data {
         spdlog::info("read_lines_maxi_batched done; reached the end of files");
     };
 
-
-    struct MultiThreadedLoader {
-        /*
-        File reading is done on a single thread
-        the rest of work is done on multiple worker threads
-        */
-        
-        struct StatusContainer {
-            bool reader_done = false;
-            size_t n_workers_started = 0;
-            size_t n_workers_done = 0;
-
-            StatusContainer() = default;
-            StatusContainer(StatusContainer&&) = delete;
-            StatusContainer(const StatusContainer&) = delete;
-            StatusContainer& operator=(const StatusContainer&) = delete;
-
-            bool is_done() {
-                return reader_done && n_workers_started > 0 && n_workers_done == n_workers_started;
-            }
-        };
-
-        DataLoader& loader;
-        std::vector<std::string> data_paths;
-        size_t mini_batch;
-        size_t maxi_batch;
-        size_t maxi_batch_size;
-        bool max_length_crop;
-        std::vector<size_t> max_lengths;
-        StatusContainer status;
-
-        std::queue<vector<IdRawExample>> maxi_batch_queue;
-        std::queue<Batch> mini_batch_queue;
-        size_t max_queue_size = 32;
-        std::mutex mutex;
-        std::condition_variable cv;
-
-        std::vector<std::thread> _all_threads;
-        
-        MultiThreadedLoader(DataLoader& loader, std::vector<std::string> data_paths, size_t mini_batch, size_t maxi_batch,
-            bool max_length_crop, std::vector<size_t> max_lengths)
-            :
-                loader(loader),
-                data_paths(data_paths),
-                mini_batch(mini_batch),
-                maxi_batch(maxi_batch),
-                maxi_batch_size(maxi_batch * mini_batch),
-                max_length_crop(max_length_crop),
-                max_lengths(max_lengths) 
-        {}
-
-        MultiThreadedLoader(DataLoader& loader, YAML::Node config):
-            MultiThreadedLoader(loader,
-                config["data"].as<std::vector<std::string>>(),
-                config["mini_batch"].as<size_t>(),
-                config["maxi_batch"].as<size_t>(1),
-                config["max_length_crop"].as<bool>(false),
-                config["max_length"].as<std::vector<size_t>>())
-                {}
-
-        MultiThreadedLoader() = delete;
-        MultiThreadedLoader(MultiThreadedLoader&&) = delete;
-        MultiThreadedLoader(const MultiThreadedLoader&) = delete;
-        MultiThreadedLoader& operator=(const MultiThreadedLoader&) = delete;
-
-        ~MultiThreadedLoader() {
-            spdlog::info("Destroying MultiThreadedLoader");
-            for (auto& thread : _all_threads) {
-                if (thread.joinable()) {
-                    #ifdef _WIN32
-                        TerminateThread(thread.native_handle(), 1);
-                    #else
-                        pthread_cancel(thread.native_handle());
-                    #endif
-                }
-            }
+    MultiThreadedLoader::~MultiThreadedLoader() {
+        spdlog::info("Destroying MultiThreadedLoader");
+        for (auto& thread : all_threads) {
+            spdlog::info("Stopping thread id: {}", thread.get_id());
+            thread.request_stop();
         }
+        spdlog::info("MultiThreadedLoader destroyed");
+    }
 
-        void read_task() {
+    void MultiThreadedLoader::read_task() {
 
-            spdlog::info("Reader thread started");
-            size_t count = 0;
-            for (auto maxi_batch : read_lines_maxi_batched(data_paths, maxi_batch_size)) {
-                { // scope for lock
-                    std::unique_lock<std::mutex> lock(mutex);
-                    cv.wait(lock, [&] { return maxi_batch_queue.size() < max_queue_size; });
-                    maxi_batch_queue.push(maxi_batch);
-                    count++;
-                    spdlog::debug("reader_thread maxi_batch_count: {}", count);
-                    lock.unlock();
-                    cv.notify_one();
+        spdlog::info("Reader thread started");
+        size_t count = 0;
+        for (auto maxi_batch : read_lines_maxi_batched(data_paths, maxi_batch_size)) {
+            if (!input_mappers.empty()) {
+                // map input fields using input_mappers
+                for (auto &[id, ex] : maxi_batch) {
+                    for (size_t i = 0; i < std::min(ex.size(), input_mappers.size()); ++i) {
+                        ex[i] = input_mappers[i]->map(ex[i]);
+                    }
                 }
             }
             { // scope for lock
                 std::unique_lock<std::mutex> lock(mutex);
-                status.reader_done = true;
-                cv.notify_all();
-            }
-            spdlog::info("Reader thread done");
-        }
-
-        void inner_work() {
-            size_t worker_id;
-            {
-                std::unique_lock<std::mutex> lock(mutex);
-                worker_id = ++status.n_workers_started;
-                spdlog::info("Worker started: {}", status.n_workers_started);
-            }
-            size_t count = 0;
-            while (true) {
-                std::unique_lock<std::mutex> lock(mutex);
-                cv.wait(lock, [&] { return !maxi_batch_queue.empty() || status.reader_done; });
-                if (status.reader_done && maxi_batch_queue.empty()) {
-                    return;
-                }
-                auto maxi_batch = maxi_batch_queue.front();
-                maxi_batch_queue.pop();
-                lock.unlock();
-                spdlog::debug("worker {}: maxi_batch_count: {} maxi_batch_size: {}", worker_id, count, maxi_batch.size());
-                auto maxi_gen = vector_to_generator<IdRawExample>(std::move(maxi_batch));
-                auto examples = loader.read_examples(std::move(maxi_gen), max_lengths, max_length_crop);
-                auto examples_shufd = loader.buffered_shuffle(examples, mini_batch * maxi_batch_size);
-                auto batches = loader.make_batches(examples_shufd, mini_batch);
-                for (auto& batch : batches) {
-                    std::unique_lock<std::mutex> lock(mutex);
-                    cv.wait(lock, [&] { return mini_batch_queue.size() < max_queue_size; });
-                    mini_batch_queue.push(batch);
-                    lock.unlock();
-                    cv.notify_one();
-                }
-                {
-                    std::unique_lock<std::mutex> lock(mutex);
-                    status.n_workers_done++;
-                    spdlog::debug("Worker done: {}", status.n_workers_done);
-                }
-            }
-        }
-
-        void start(size_t num_threads) {
-            std::thread reader_thread(&MultiThreadedLoader::read_task, this);
-            _all_threads.push_back(std::move(reader_thread));
-            
-            for (size_t i = 0; i < num_threads; i++) {
-                std::thread worker_thread(&MultiThreadedLoader::inner_work, this);
-                _all_threads.push_back(std::move(worker_thread));
-            }
-            /*
-            reader_thread.join();
-            for (auto& thread : worker_threads) {
-                thread.join();
-            }
-            */
-            // NOTE: generator might stop reading anytime which result in thread termination
-            // if you terminate a thread without join or detach, you get "terminate called without an active exception"
-            // and the program crashes. So we detach the thread as we don't need to join it.
-            // Note2: our worker threads wait for the reader thread to finish (see reader_done and producer_done), so we don't need to join it.
-            //for (auto& thread : _all_threads) {
-            //    thread.detach();
-            //}
-        }
-
-        auto iterator() -> Generator<Batch> {
-            while (true) {
-                std::unique_lock<std::mutex> lock(mutex);
-                cv.wait(lock, [&] {return !mini_batch_queue.empty() || status.is_done(); });
-                if (status.is_done() && mini_batch_queue.empty()) {
-                    break;
-                }
-                auto batch = mini_batch_queue.front();
-                mini_batch_queue.pop();
+                cv.wait(lock, [&] { return maxi_batch_queue.size() < max_queue_size; });
+                maxi_batch_queue.push(maxi_batch);
+                count++;
+                spdlog::debug("reader_thread maxi_batch_count: {}", count);
                 lock.unlock();
                 cv.notify_one();
-
-                //batch.contiguous();
-                co_yield batch;
             }
         }
-
-    };
-
-
-    auto DataLoader::get_data_async(std::string dataset_name, size_t num_threads) -> Generator<Batch> {
-
-        auto loader = MultiThreadedLoader(*this, config[dataset_name]);
-        loader.start(num_threads);
-
-        for (auto batch : loader.iterator()) {
-            co_yield batch;
+        { // scope for lock
+            std::unique_lock<std::mutex> lock(mutex);
+            status.reader_done = true;
+            cv.notify_all();
         }
-        spdlog::info("All workers done");
+        spdlog::info("Reader thread done");
+    }
+
+    void MultiThreadedLoader::batching_task() {
+        size_t worker_id;
+        {
+            std::unique_lock<std::mutex> lock(mutex);
+            worker_id = ++status.n_workers_started;
+            spdlog::info("Worker started: {}", status.n_workers_started);
+        }
+        size_t count = 0;
+
+        while (true) {
+            std::unique_lock<std::mutex> lock(mutex);
+            cv.wait(lock, [&] { return !maxi_batch_queue.empty() || status.reader_done; });
+            if (status.reader_done && maxi_batch_queue.empty()) {
+                return;
+            }
+            auto maxi_batch = maxi_batch_queue.front();
+            maxi_batch_queue.pop();
+            lock.unlock();
+            spdlog::debug("worker {}: maxi_batch_count: {} maxi_batch_size: {}", worker_id, count, maxi_batch.size());
+            auto maxi_gen = vector_to_generator<IdRawExample>(std::move(maxi_batch));
+            auto examples = loader.read_examples(std::move(maxi_gen), max_lengths, max_length_crop, add_eos);
+            auto examples_shufd = loader.buffered_shuffle(examples, mini_batch * maxi_batch_size);
+            auto batches = loader.make_batches(examples_shufd, mini_batch);
+            for (auto& batch : batches) {
+                std::unique_lock<std::mutex> lock(mutex);
+                cv.wait(lock, [&] { return mini_batch_queue.size() < max_queue_size; });
+                mini_batch_queue.push(std::move(batch));
+                lock.unlock();
+                cv.notify_one();
+            }
+            {
+                std::unique_lock<std::mutex> lock(mutex);
+                status.n_workers_done++;
+                spdlog::debug("Worker done: {}", status.n_workers_done);
+            }
+        }
+    }
+
+    void MultiThreadedLoader::start(size_t num_threads) {
+        auto reader_thread = std::jthread(&MultiThreadedLoader::read_task, this);
+        all_threads.push_back(std::move(reader_thread));
+
+        for (size_t i = 0; i < num_threads; i++) {
+            auto worker_thread = std::jthread(&MultiThreadedLoader::batching_task, this);
+            all_threads.push_back(std::move(worker_thread));
+        }
+        /*
+        reader_thread.join();
+        for (auto& thread : worker_threads) {
+            thread.join();
+        }
+        */
+        // NOTE: generator might stop reading anytime which result in thread termination
+        // if you terminate a thread without join or detach, you get "terminate called without an active exception"
+        // and the program crashes. So we detach the thread as we don't need to join it.
+        // Note2: our worker threads wait for the reader thread to finish (see reader_done and producer_done), so we don't need to join it.
+        //for (auto& thread : all_threads) {
+        //    thread.detach();
+        //}
+    }
+
+    auto MultiThreadedLoader::generator() -> Generator<Batch> {
+        while (true) {
+            std::unique_lock<std::mutex> lock(mutex);
+            cv.wait(lock, [&] {return !mini_batch_queue.empty() || status.is_done(); });
+            if (status.is_done() && mini_batch_queue.empty()) {
+                break;
+            }
+            auto batch = mini_batch_queue.front();
+            mini_batch_queue.pop();
+            lock.unlock();
+            cv.notify_one();
+
+            //batch.contiguous();
+            co_yield std::move(batch);
+        }
     }
 
 
