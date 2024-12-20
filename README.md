@@ -13,7 +13,11 @@ hence we use latest C++ standard (C++23) which makes a lot of things simpler.
 Step 0: Download source code
 
 ```bash
+git clone --recurse-submodules $URL
 
+# Option 2: if you'd already cloned without submodule
+git clone $URL
+cd tahoma
 git submodule update --init --recursive
 ```
 
@@ -29,47 +33,60 @@ Step2:
 Install cmake, gcc etc. Note: we are coding based on C++23 standard.
 
 ```bash
-sudo apt install gcc-12 g++-12 cmake build-essential pkg-config libgoogle-perftools-dev
-
-# Using backwards-cpp to get debug stacktrace on crashes/exceptions
-# And we need these for backwards-cpp to work
-sudo apt install libdw-dev
-#sudo apt install libdwarf-dev
+sudo apt install gcc-12 g++-12 cmake build-essential pkg-config libgoogle-perftools-dev libdw-dev libdwarf-dev
 ```
-
-> TODO: update the exact set of libs and lower bound on versions to support C++20
 
 
 ## Build
 
 ```bash
-
 # build using cmake and default compiler
-cmake -B build .
-# build using your specifed compiler. Eg. clang-17
-CC=clang-17 CXX=clang++-17 cmake . -B build
-cmake . -B build -DCMAKE_CC_COMPILER=clang-17 -DCMAKE_CXX_COMPILER=clang++17 .
-# compile
-make -j
+cmake . -B build -DUSE_CUDA=on -DCOMPILE_TESTS=on
+cmake --build build -j
 
-# sample run
-./rtgp workdir -c ../examples/nmt/transformer.toml
-
+build/tahoma -h 
 ```
 
-## Compile and Run Tests
+## Metrics
+
+### Metricx
+
+Step 1. Download model and save it as .npz
+
+```bash
+MODEL=metricx-24-hybrid-large-v2p6
+TOKENIZER=mt5-base
+
+scripts/torch2npz.py -m google/$MODEL -o tmp/$MODEL
+scripts/torch2npz.py -m google/$TOKENIZER -o tmp/$TOKENIZER
+cp tmp/$TOKENIZER/spiece.model tmp/$MODEL/
+```
+torch2npz.py requires python environment with huggingface transformers. 
+Alternatively, if you have access, you may obtain converted models from blob storage @ `https://tgwus2.blob.core.windows.net/data/cache/tahoma/models/`
+
+Step 2. Run 
+```bash
+CUDA_VISIBLE_DEVICES=0
+MODEL=metricx-24-hybrid-large-v2p6
+echo -e "source\tcandidate\treference" | build/tahoma predict -m tmp/$MODEL/model.npz -v tmp/$MODEL/spiece.model
+echo -e "source\tcandidate" | build/tahoma predict -m tmp/$MODEL/model.npz -v tmp/$MODEL/spiece.model --qe
+```
+
+
+## Run Tests
 
 Tests are powered by Cmake and CTest. To enable set `-DCOMPILE_TESTS=on`
 
 ```bash
-cmake -B build -DCCOMPILE_TESTS=on
+cmake -B build -DCOMPILE_TESTS=on -DUSE_CUDA=on
 cmake --build build -j
+
 # produces an executable at build/tests/tahoma-tests
 # you may directly run the executable e.g. for debugging via gdb
-# but recommeneded way is ctest
-
-ctest -V --test-dir build
+ but recommeneded way is ctest
+ctest -V --test-dir build/tests
 ```
+
 
 ## VS Code Setup
 
@@ -83,8 +100,10 @@ This project relies on libTorch. It'd be useful to know how to build libTorch
 
 ## Developer Notes
 
-. include/ <-- Header files (.h)
-. src/   <--  All implementations (.cpp)
+```
+include/   <-- Header files (.h)
+src/      <--  All implementations (.cpp)
+```
 
 Header files and implementations should mirror each other.
 
