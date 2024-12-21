@@ -86,8 +86,9 @@ namespace tahoma::data {
         auto read_examples(std::vector<std::string> data_paths, std::vector<size_t> max_lengths, bool max_length_crop = true, size_t num_threads = 1, bool add_eos = true) -> Generator<data::Example>;
 
         //template <typename T>
-        auto buffered_shuffle(Generator<Example>& examples, size_t buffer_size) -> Generator<Example>;
-        auto make_batches(Generator<Example>& examples, size_t batch_size, bool contiguous = false) -> Generator<Batch>;
+        auto buffered_shuffle(Generator<Example> examples, size_t buffer_size) -> Generator<Example>;
+        auto sort_examples(Generator<Example> examples,  size_t buffer_size, size_t sort_field, bool reverse=false) -> Generator<Example>;
+        auto make_batches(Generator<Example> examples, size_t batch_size, bool contiguous = false) -> Generator<Batch>;
         auto get_train_data(size_t n_data_threads = 1) -> Generator<Batch>;
         auto get_validation_data() -> Generator<Batch>;
         auto get_samples(std::vector<std::string> data_paths, size_t num_samples) -> Batch;
@@ -104,6 +105,7 @@ namespace tahoma::data {
             return map(line);
         }
     };
+
 
     struct MultiThreadedLoader {
         /*
@@ -130,12 +132,13 @@ namespace tahoma::data {
         std::vector<std::string> data_paths;
         size_t mini_batch;
         size_t maxi_batch;
-        size_t maxi_batch_size;
+        size_t maxi_buffer_size;
         bool max_length_crop;
         std::vector<size_t> max_lengths;
         bool add_eos = true;
         StatusContainer status;
 
+        string sort_by = ""; // random, length
         std::queue<vector<IdRawExample>> maxi_batch_queue;
         std::queue<Batch> mini_batch_queue;
         size_t max_queue_size = 32;
@@ -143,9 +146,8 @@ namespace tahoma::data {
         std::condition_variable cv;
 
         std::vector<std::jthread> all_threads;
-
         std::vector<Ptr<LineMapper>> input_mappers;
-
+        std::stop_source stop_source;
 
         MultiThreadedLoader(DataLoader& loader, std::vector<std::string> data_paths, size_t mini_batch, size_t maxi_batch,
             bool max_length_crop, std::vector<size_t> max_lengths, std::vector<Ptr<LineMapper>> input_mappers)
@@ -154,7 +156,7 @@ namespace tahoma::data {
             data_paths(data_paths),
             mini_batch(mini_batch),
             maxi_batch(maxi_batch),
-            maxi_batch_size(maxi_batch* mini_batch),
+            maxi_buffer_size(maxi_batch* mini_batch),
             max_length_crop(max_length_crop),
             max_lengths(max_lengths),
             input_mappers(input_mappers)
@@ -176,9 +178,8 @@ namespace tahoma::data {
         MultiThreadedLoader& operator=(const MultiThreadedLoader&) = delete;
         ~MultiThreadedLoader();
 
-        void read_task();
-        void batching_task();
         void start(size_t num_threads);
+        void stop();
         auto generator() -> Generator<Batch>;
 
     };

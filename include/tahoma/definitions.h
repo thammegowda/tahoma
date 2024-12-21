@@ -95,7 +95,7 @@ namespace tahoma {
     inline int global_setup() {
 
         spdlog::set_default_logger(spdlog::stderr_color_mt("console"));
-        spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [t%t] [%^%l%$] %v");
+        spdlog::set_pattern("[%Y%m%d %H:%M:%S.%e] [t%t] [%^%l%$] %v");
         spdlog::set_level(spdlog::level::info);
         spdlog::debug("Global setup started");
         backward::SignalHandling sh;

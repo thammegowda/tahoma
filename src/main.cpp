@@ -38,10 +38,14 @@ int main(int argc, char* argv[]) {
         .help("Input file containing TSV records. '-' for stdin. For metrics, the following field order is expected: source, hypothesis, reference")
         .default_value("-");
 
-    predict_cmd.add_argument("-bs", "--batch-size")
-        .scan<'d', int>()
+    predict_cmd.add_argument("-b", "--mini-batch")
+        .scan<'d', size_t>()
         .help("Batch Size")
-        .default_value(1);
+        .default_value((size_t) 1);
+    predict_cmd.add_argument("-mx", "--maxi-batch")
+        .scan<'d', size_t>()
+        .help("Buffer these many mini batches for sorting and shuffling when applicable")
+        .default_value((size_t)1);
 
     predict_cmd.add_argument("-qe", "--qe")
         .help("Quality Estimation model")
@@ -97,7 +101,8 @@ int main(int argc, char* argv[]) {
         Pack pred_args = {
             {"qe", predict_cmd.get<bool>("qe")},
             {"print_model", predict_cmd.get<bool>("print-model")},
-            {"batch_size", predict_cmd.get<int>("batch-size")},
+            {"mini_batch", predict_cmd.get<size_t>("mini-batch")},
+            {"maxi_batch", predict_cmd.get<size_t>("maxi-batch")},
             {"vocab_paths", vocab_paths},
         };
         inference::predict(model_path, input_file, pred_args);

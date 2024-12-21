@@ -208,9 +208,9 @@ namespace tahoma::data {
      * @param buffer_size: the size of the buffer
      * @return a generator of shuffled examples
     */
-    auto DataLoader::buffered_shuffle(Generator<Example>& examples, size_t buffer_size) -> Generator<Example> {
+    auto DataLoader::buffered_shuffle(Generator<Example> examples, size_t buffer_size) -> Generator<Example> {
         std::vector<Example> buffer;
-        std::vector<int32_t> indices(buffer_size);
+        std::vector<size_t> indices(buffer_size);
         std::iota(indices.begin(), indices.end(), 0);
         auto rng = std::default_random_engine{};
 
@@ -233,6 +233,43 @@ namespace tahoma::data {
         }
     }
 
+    auto DataLoader::sort_examples(Generator<Example> examples, size_t buffer_size,
+        size_t sort_field, bool reverse) -> Generator<Example> {
+        std::vector<Example> buffer;
+        std::vector<size_t> keys(buffer_size);   // sort keys
+        std::vector<size_t> indices(buffer_size);
+        size_t idx = -1;
+        if (buffer_size < 1) {
+            throw std::runtime_error("buffer_size must be >= 1, given: " + buffer_size);
+        }
+
+        auto compare = [&](size_t i, size_t j) {
+            return reverse ? keys[i] > keys[j] : keys[i] < keys[j];
+            };
+
+        for (auto ex : examples) {
+            idx++;
+            buffer.push_back(ex);
+            indices[idx] = idx;
+            keys[idx] = ex.field_ids[sort_field].size();
+            if (buffer.size() == buffer_size) {
+                std::sort(indices.begin(), indices.end(), compare);
+                for (auto i : indices) {
+                    co_yield buffer[i];
+                }
+                buffer.clear();
+                idx = -1;
+            }
+        }
+        // the last buffer maybe not full to buffer_size
+        if (!buffer.empty()) {
+            std::sort(indices.begin(), indices.begin() + idx, compare);
+            for (size_t i = 0; i < idx; ++i) {
+                co_yield buffer[indices[i]];
+            }
+        }
+    }
+
     /**
      * Make batches from examples
      * @param examples: a generator of examples
@@ -241,7 +278,7 @@ namespace tahoma::data {
      * @return a generator of batches
      * @note: the last batch may be smaller than batch_size
     */
-    auto DataLoader::make_batches(Generator<Example>& examples, size_t batch_size,
+    auto DataLoader::make_batches(Generator<Example> examples, size_t batch_size,
         bool contiguous) -> Generator<Batch> {
         // TODO: buffer and batch equal length examples to reduce padding
         if (batch_size == 0) {
@@ -267,8 +304,7 @@ namespace tahoma::data {
         } else if (n_data_threads == 0) { // synchronous, on the same thread
             spdlog::debug("Data loading on the main thread");
             return get_data_sync("trainer");
-        }
-        else {
+        } else {
             throw std::runtime_error("n_data_threads must be >= 0; given " + n_data_threads);
         }
     }
@@ -292,7 +328,7 @@ namespace tahoma::data {
             };
         auto samples_gen = vector_to_generator();
         auto examples = read_examples(std::move(samples_gen), {}, false);
-        auto batches = make_batches(examples, num_samples);
+        auto batches = make_batches(std::move(examples), num_samples);
         for (auto batch : batches) {
             return batch; // first batch
         }
@@ -313,8 +349,8 @@ namespace tahoma::data {
         spdlog::info("max_length_crop: {}, max_length: {}", max_length_crop, fmt::join(max_length, ", "));
 
         auto examples = read_examples(data_paths, max_length, max_length_crop);
-        auto examples_shufd = buffered_shuffle(examples, mini_batch * maxi_batch);
-        auto batches = make_batches(examples_shufd, mini_batch);
+        examples = buffered_shuffle(std::move(examples), mini_batch * maxi_batch);
+        auto batches = make_batches(std::move(examples), mini_batch);
         // CAUTION: direct return of batches generator lead to segfault during coroutine resume
         // we need to co_yield within this function to avoid destruction of coroutines stack 
         // TODO: find a way to forward/relay the generator without the for each co_yield 
@@ -335,8 +371,8 @@ namespace tahoma::data {
         spdlog::info("All workers done");
     }
 
-    auto read_lines_maxi_batched(const std::vector<std::string>& data_paths,
-        size_t maxi_batch_size) -> Generator<vector<IdRawExample>> {
+    auto read_lines_buffered(const std::vector<std::string>& data_paths,
+        size_t buffer_size) -> Generator<vector<IdRawExample>> {
         auto rows = read_lines(data_paths);  // generator<vector<string>>
         vector<IdRawExample> buffer;
         size_t rec_num = 0;
@@ -347,7 +383,7 @@ namespace tahoma::data {
                 continue;
             }
             buffer.push_back({ rec_num, line });
-            if (buffer.size() >= maxi_batch_size) {
+            if (buffer.size() >= buffer_size) {
                 co_yield buffer;
                 buffer.clear();
             }
@@ -355,96 +391,124 @@ namespace tahoma::data {
         if (!buffer.empty()) {
             co_yield buffer;
         }
-        spdlog::info("read_lines_maxi_batched done; reached the end of files");
+        spdlog::info("read_lines_buffered done; reached the end of files");
     };
 
     MultiThreadedLoader::~MultiThreadedLoader() {
-        spdlog::info("Destroying MultiThreadedLoader");
-        for (auto& thread : all_threads) {
-            spdlog::info("Stopping thread id: {}", thread.get_id());
-            thread.request_stop();
-        }
-        spdlog::info("MultiThreadedLoader destroyed");
+        spdlog::info("Stopping MultiThreadedLoader and {} threads", all_threads.size());
+        stop();
+        spdlog::info("MultiThreadedLoader stopped");
     }
 
-    void MultiThreadedLoader::read_task() {
-
-        spdlog::info("Reader thread started");
-        size_t count = 0;
-        for (auto maxi_batch : read_lines_maxi_batched(data_paths, maxi_batch_size)) {
-            if (!input_mappers.empty()) {
-                // map input fields using input_mappers
-                for (auto& [id, ex] : maxi_batch) {
-                    for (size_t i = 0; i < std::min(ex.size(), input_mappers.size()); ++i) {
-                        ex[i] = input_mappers[i]->map(ex[i]);
+    void MultiThreadedLoader::start(size_t num_threads) {
+        if (all_threads.size() > 0) {
+            throw std::runtime_error("Threads already started");
+        }
+        //=================================================//
+        auto maxi_batch_task = [&](const std::stop_token& stoken){
+            spdlog::info("Reader thread started");
+            size_t count = 0;
+            for (auto maxi_batch : read_lines_buffered(data_paths, maxi_buffer_size)) {
+                if (!input_mappers.empty()) {
+                    // map input fields using input_mappers
+                    for (auto& [id, ex] : maxi_batch) {
+                        for (size_t i = 0; i < std::min(ex.size(), input_mappers.size()); ++i) {
+                            ex[i] = input_mappers[i]->map(ex[i]);
+                        }
                     }
                 }
-            }
-            { // scope for lock
-                std::unique_lock<std::mutex> lock(mutex);
-                cv.wait(lock, [&] { return maxi_batch_queue.size() < max_queue_size; });
-                maxi_batch_queue.push(maxi_batch);
-                count++;
-                spdlog::debug("reader_thread maxi_batch_count: {}", count);
-                lock.unlock();
-                cv.notify_one();
-            }
-        }
-        { // scope for lock
-            std::unique_lock<std::mutex> lock(mutex);
-            status.reader_done = true;
-            cv.notify_all();
-        }
-        spdlog::info("Reader thread done");
-    }
-
-    void MultiThreadedLoader::batching_task() {
-        size_t worker_id;
-        {
-            std::unique_lock<std::mutex> lock(mutex);
-            worker_id = ++status.n_workers_started;
-            spdlog::info("Worker started: {}", status.n_workers_started);
-        }
-        size_t count = 0;
-
-        while (true) {
-            std::unique_lock<std::mutex> lock(mutex);
-            cv.wait(lock, [&] { return !maxi_batch_queue.empty() || status.reader_done; });
-            if (status.reader_done && maxi_batch_queue.empty()) {
-                return;
-            }
-            auto maxi_batch = maxi_batch_queue.front();
-            maxi_batch_queue.pop();
-            lock.unlock();
-            spdlog::debug("worker {}: maxi_batch_count: {} maxi_batch_size: {}", worker_id, count, maxi_batch.size());
-            auto maxi_gen = vector_to_generator<IdRawExample>(std::move(maxi_batch));
-            auto examples = loader.read_examples(std::move(maxi_gen), max_lengths, max_length_crop, add_eos);
-            auto examples_shufd = loader.buffered_shuffle(examples, mini_batch * maxi_batch_size);
-            auto batches = loader.make_batches(examples_shufd, mini_batch);
-            for (auto& batch : batches) {
-                std::unique_lock<std::mutex> lock(mutex);
-                cv.wait(lock, [&] { return mini_batch_queue.size() < max_queue_size; });
-                mini_batch_queue.push(std::move(batch));
-                lock.unlock();
+                //spdlog::debug("Maxi batch {} size: {}. Going to wait for a lock", count, maxi_batch.size());
+                {
+                    std::unique_lock<std::mutex> lock(mutex);
+                    cv.wait(lock, [&]{ return stoken.stop_requested() || maxi_batch_queue.size() < max_queue_size; });
+                    if (stoken.stop_requested()) { break; }
+                    //spdlog::debug("Maxi batch thread pushing  {}", count);
+                    maxi_batch_queue.push(maxi_batch);
+                    count++;
+                }
                 cv.notify_one();
             }
             {
                 std::unique_lock<std::mutex> lock(mutex);
-                status.n_workers_done++;
-                spdlog::debug("Worker done: {}", status.n_workers_done);
+                status.reader_done = true;
             }
+            cv.notify_all();
+            spdlog::info("Maxi batching thread done");
+        };
+
+        //=================================================//
+        auto mini_batch_task = [&](const std::stop_token& stoken){
+            std::unique_lock<std::mutex> lock(mutex);
+            const auto worker_id = ++status.n_workers_started;
+            lock.unlock();
+            spdlog::info("Worker {} started", worker_id);
+            
+            size_t count = 0;
+            while (true) {
+                std::unique_lock<std::mutex> lock(mutex);
+                cv.wait(lock, [&] { return stoken.stop_requested() || !maxi_batch_queue.empty() || status.reader_done; });
+                if (stoken.stop_requested() || status.reader_done && maxi_batch_queue.empty()) {
+                    break;
+                }
+                auto maxi_batch = maxi_batch_queue.front();
+                maxi_batch_queue.pop();
+                lock.unlock();
+                cv.notify_all();
+
+                spdlog::debug("worker {}: maxi_batch_count: {} maxi_buffer_size: {}", worker_id, count, maxi_batch.size());
+                auto maxi_gen = vector_to_generator<IdRawExample>(std::move(maxi_batch));
+                auto examples = loader.read_examples(std::move(maxi_gen), max_lengths, max_length_crop, add_eos);
+                if (sort_by == "random") {
+                    examples = loader.buffered_shuffle(std::move(examples), maxi_buffer_size);
+                } else if (sort_by == "length") {
+                    const size_t sort_field = 0; // sort by the first field
+                    examples = loader.sort_examples(std::move(examples), maxi_buffer_size, sort_field, /*reverse*/true);
+                }
+
+                auto batches = loader.make_batches(std::move(examples), mini_batch);
+                for (auto& batch : batches) {
+                    std::unique_lock<std::mutex> lock(mutex);
+                    cv.wait(lock, [&] { return stoken.stop_requested() || mini_batch_queue.size() < max_queue_size; });
+                    if (stoken.stop_requested()) {
+                        break;
+                    }
+                    mini_batch_queue.push(std::move(batch));
+                    lock.unlock();
+                    cv.notify_all();
+                }
+            }
+            {
+                std::unique_lock<std::mutex> lock(mutex);
+                status.n_workers_done++;
+                spdlog::info("Worker {} done; total workers completed {}", worker_id, status.n_workers_done);
+                cv.notify_all();
+            }
+        };
+
+        auto stoken = stop_source.get_token();
+        all_threads.push_back(std::jthread(maxi_batch_task, stoken));
+        for (size_t i = 0; i < num_threads; i++) {
+            all_threads.push_back(std::jthread(mini_batch_task, stoken));
         }
     }
 
-    void MultiThreadedLoader::start(size_t num_threads) {
-        auto reader_thread = std::jthread(&MultiThreadedLoader::read_task, this);
-        all_threads.push_back(std::move(reader_thread));
-
-        for (size_t i = 0; i < num_threads; i++) {
-            auto worker_thread = std::jthread(&MultiThreadedLoader::batching_task, this);
-            all_threads.push_back(std::move(worker_thread));
+    void MultiThreadedLoader::stop() {
+        // request all threads to stop
+        spdlog::info("Requesting all threads to stop");
+        for (auto& t : all_threads) {
+            t.request_stop();
+            // BUG: maxi_batch_task's stoken.stop_requested() sometimes dont get triggered
+            // so we are using the below additional stop request which seems to work
+            stop_source.request_stop();
         }
-
+        size_t i = 0;
+        for (auto& t : all_threads) {
+            i++;
+            if (t.joinable()) {
+                spdlog::debug("Joining worker {} thread {}", i, t.get_id());
+                t.join();
+            }
+        }
     }
 
     auto MultiThreadedLoader::generator() -> Generator<Batch> {
@@ -458,7 +522,6 @@ namespace tahoma::data {
             mini_batch_queue.pop();
             lock.unlock();
             cv.notify_one();
-
             //batch.contiguous();
             co_yield std::move(batch);
         }

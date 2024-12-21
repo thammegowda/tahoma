@@ -67,7 +67,7 @@ namespace tahoma::tests {
         auto max_lengths = config["trainer"]["max_length"].as<std::vector<size_t>>();
         auto examples = data_loader.read_examples(paths, max_lengths, true);
         auto batch_size = 32;
-        auto batches = data_loader.make_batches(examples, batch_size);
+        auto batches = data_loader.make_batches(std::move(examples), batch_size);
         auto count = 1000;
         for (auto batch : batches) {
             if (--count == 0) {
@@ -100,8 +100,8 @@ namespace tahoma::tests {
         spdlog::info("max_length_crop: {}, max_length: {}", max_length_crop, fmt::join(max_length, ", "));
 
         auto examples = data_loader.read_examples(data_paths, max_length, max_length_crop);
-        auto examples_shufd = data_loader.buffered_shuffle(examples, mini_batch * 10);
-        auto batches = data_loader.make_batches(examples_shufd, mini_batch);
+        auto examples_shufd = data_loader.buffered_shuffle(std::move(examples), mini_batch * 10);
+        auto batches = data_loader.make_batches(std::move(examples_shufd), mini_batch);
 
         /////
         size_t batch_count = 0;
