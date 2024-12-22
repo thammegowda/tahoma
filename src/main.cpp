@@ -13,6 +13,7 @@ std::string get_version() {
 
 
 int main(int argc, char* argv[]) {
+    auto start_time = std::chrono::system_clock::now();
     if (global_setup() != 0) {
         return 1;
     }
@@ -111,6 +112,8 @@ int main(int argc, char* argv[]) {
         std::cerr << parser;
         return 2;
     }
-    spdlog::info("main finished..");
+    auto end_time = std::chrono::system_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time);
+    spdlog::info("main finished.. elapsed: {:L}s", elapsed.count());
     return 0;
 }

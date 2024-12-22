@@ -111,13 +111,15 @@ namespace tahoma::inference {
             auto regression_model = std::dynamic_pointer_cast<model::metricx::RegressionImpl>(models[0]);
             size_t mini_batch = options.get<size_t>("mini_batch", 1);
             size_t maxi_batch = options.get<size_t>("maxi_batch", 1);
-            size_t max_length = options.get<size_t>("max_length", 1024);
             size_t n_data_threads = options.get("data_threads", std::max((size_t)4, devices.size()));
             auto line_mapper = std::make_shared<MetricxLineMapper>(regression_model, options.get("qe", false));
+            size_t max_length = options.get<size_t>("max_length", regression_model->max_input_length());
+            bool max_length_crop = true;
             auto collector = OutputCollector(output_file);
             size_t batch_count = 0;
-            auto mloader = data::MultiThreadedLoader(data_loader, { input_file }, mini_batch, maxi_batch, false, { max_length },
-                { line_mapper });
+            auto mloader = data::MultiThreadedLoader(
+                data_loader, { input_file }, mini_batch, maxi_batch, 
+                max_length_crop, { max_length }, { line_mapper });
             mloader.add_eos = false;
             mloader.sort_by = "length";
             mloader.start(n_data_threads);
@@ -151,10 +153,10 @@ namespace tahoma::inference {
                         auto out = model->forward(inps_pack);
                         auto scores = std::any_cast<torch::Tensor>(out["result"]);
                         for (int i = 0; i < scores.size(0); ++i) {
-                            size_t id = batch.examples[i].id;
+                            auto ex = batch.examples[i];
+                            //string line = fmt::format("{:.6f}\t{}\tlength: {}", scores[i].item<float>(), ex.id, ex.fields[0].size());
                             string line = fmt::format("{:.6f}", scores[i].item<float>());
-                            line += "\t length: " + batch.examples[i].fields[0].size();
-                            collector.put(id, line);
+                            collector.put(ex.id, line);
                         }
                     }
                     spdlog::info("Worker {} finished", worker_id);

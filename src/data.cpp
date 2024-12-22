@@ -107,18 +107,15 @@ namespace tahoma::data {
     auto DataLoader::make_example(size_t id, std::vector<std::string> fields,
         vector<i32> eos_ids, std::vector<size_t> max_lengths, bool max_length_crop) -> Example {
         i32 num_fields = fields.size();
-        bool skip = false;
         auto field_ids = vector2d<int32_t>(num_fields);
         for (size_t i = 0; i < num_fields; ++i) {
             auto ids = vocabs[i]->EncodeAsIds(fields[i]);
             if (eos_ids.size() > i and eos_ids[i] >= 0) {
                 ids.push_back(eos_ids[i]);  // append token id
             }
-            //ids.push_back(eos_ids[i]);  // append token id
             if (max_length_crop && ids.size() > max_lengths[i]) {
                 ids = vector<int32_t>(ids.begin(), ids.begin() + max_lengths[i]);
             }
-            skip = skip || ids.empty();
             field_ids[i] = ids;
         }
         return Example(id, fields, field_ids);
@@ -404,6 +401,8 @@ namespace tahoma::data {
         if (all_threads.size() > 0) {
             throw std::runtime_error("Threads already started");
         }
+        spdlog::info("Starting data loader with {} threads; \n\tdata_paths: {},\n\tmaxi_batch: {},\n\tmini_batch: {}\n\tmax_length_crop: {}\n\tmax_lengths: {}",
+            num_threads, fmt::join(data_paths, ", "), maxi_batch, mini_batch, max_length_crop, fmt::join(max_lengths, ", "));  
         //=================================================//
         auto maxi_batch_task = [&](const std::stop_token& stoken){
             spdlog::info("Reader thread started");

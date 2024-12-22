@@ -16,7 +16,7 @@ namespace tahoma::model::metricx {
 
         RegressionImpl(const YAML::Node& config)
             : model::mt5::ConditionalGenerationImpl(config),
-            model_id { config["model_id"].as<string>() },
+            model_id{ config["model_id"].as<string>() },
             model_year{ find_model_year(model_id) },
             tie_word_embeddings{ config["tie_word_embeddings"].as<bool>() }
         {}
@@ -79,8 +79,21 @@ namespace tahoma::model::metricx {
                 if (!is_qe) {
                     input += " reference: " + example["reference"];
                 }
+            } else {
+                throw std::runtime_error("Unsupported model year");
             }
             return input;
+        }
+
+        auto max_input_length() -> size_t {
+            switch (model_year) {
+            case 2023:
+                return 1024;
+            case 2024:
+                return 1536;
+            default:
+                throw std::runtime_error("Unsupported model year");
+            }
         }
 
     };

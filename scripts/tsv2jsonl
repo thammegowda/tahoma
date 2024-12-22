@@ -1,0 +1,45 @@
+#!/usr/bin/env python
+# created by TG; date: 2024-12-22
+
+"""
+This script converts a stream of TSV rows to a JSONL stream.
+By default maps STDIN to STDOUT. 
+You may specify the columns of the input TSV records using the -c/--cols option.
+"""
+import sys
+import argparse
+import logging as log
+import json
+
+log.basicConfig(level=log.INFO)
+
+
+def main():
+    try:
+        args = parse_args()
+        names = args.cols
+        inp = args.inp
+        out = args.out
+        for line_num, line in enumerate(inp, start=1):
+            fields = line.rstrip('\n').replace('\r', '').split('\t')
+            assert len(fields) >= len(names), f'Line {line_num} has {len(fields)} fields, but at least {len(names)} fields are expected'      
+            record = dict(zip(names, fields))
+            oline = json.dumps(record, ensure_ascii=False, indent=None)
+            out.write( oline + '\n')
+    finally:
+        inp.close()
+        out.close()
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Convert TSV to JSONL',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-i', '--inp', type=argparse.FileType('r', encoding='utf8'),
+                    default=sys.stdin, help='Input TSV file')
+    parser.add_argument('-o', '--out', type=argparse.FileType('w', encoding='utf8'),
+                    default=sys.stdout, help='Output JSONL file')
+    parser.add_argument('-c', '--cols', nargs='+', help='Column names of the input TSV records')
+    return parser.parse_args()
+
+if __name__ == '__main__':
+    main()
