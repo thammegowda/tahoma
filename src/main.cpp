@@ -56,6 +56,10 @@ int main(int argc, char* argv[]) {
         .help("Print model architecture")
         .default_value(false)
         .implicit_value(true);
+    predict_cmd.add_argument("-fp16", "--fp16")
+        .help("Enable FP16")
+        .default_value(false)
+        .implicit_value(true);
 
     parser.add_argument("-V", "--verbose")
         .help("Increase log verbosity")
@@ -105,6 +109,7 @@ int main(int argc, char* argv[]) {
             {"mini_batch", predict_cmd.get<size_t>("mini-batch")},
             {"maxi_batch", predict_cmd.get<size_t>("maxi-batch")},
             {"vocab_paths", vocab_paths},
+            {"fp16", predict_cmd.get<bool>("fp16")}
         };
         inference::predict(model_path, input_file, pred_args);
     } else {

@@ -6,6 +6,7 @@
 #include <tahoma/data.h>
 #include <tahoma/model/metricx.h>
 #include <tahoma/serialize.h>
+#include <ATen/autocast_mode.h>  
 
 namespace tahoma::inference {
 
@@ -79,6 +80,7 @@ namespace tahoma::inference {
         Pack options;  // runtime options from CLI
         std::vector<string> devices;
         std::vector<Ptr<model::LanguageModel>> models;
+        bool use_fp16 = false;
 
         data::DataLoader data_loader;
         Predictor(config::Config config, Pack weights, Pack options, std::vector<string> devices) :
@@ -86,13 +88,15 @@ namespace tahoma::inference {
             options(options),
             devices(devices),
             data_loader(config, utils::load_vocabs(options.get("vocab_paths", vector<string>{}))),
-            models(devices.size()) {
+            models(devices.size()),
+            use_fp16(options.get("fp16", false)) {
             std::vector<std::jthread> threads;
             for (auto idx = 0; idx < devices.size(); idx++) {
                 auto t = std::jthread([&, idx] {
                     auto dev_name = devices[idx];
                     spdlog::info("Initializing model on {}", dev_name);
                     torch::Device device(dev_name);
+                     torch::NoGradGuard no_grad;
                     auto model = utils::init_model(config, device);
                     model->set_state(weights);
                     model->eval();
@@ -116,7 +120,6 @@ namespace tahoma::inference {
             size_t max_length = options.get<size_t>("max_length", regression_model->max_input_length());
             bool max_length_crop = true;
             auto collector = OutputCollector(output_file);
-            size_t batch_count = 0;
             auto mloader = data::MultiThreadedLoader(
                 data_loader, { input_file }, mini_batch, maxi_batch, 
                 max_length_crop, { max_length }, { line_mapper });
@@ -128,18 +131,29 @@ namespace tahoma::inference {
             std::vector<std::jthread> threads;
             for (size_t worker_id = 0; worker_id < devices.size(); ++worker_id) {
                 auto t = std::jthread([&, worker_id, pad_id] {
+                    if(this->use_fp16 && torch::cuda::is_available()) {
+                        if (worker_id == 0) { // log only once
+                            spdlog::info("Enabling FP16");
+                        }
+                        //TODO: check if highlevel torch::autocast api exists. ATen is low level and not recommended 
+                        at::autocast::set_autocast_enabled(at::kCUDA, true);
+                    }
+                    torch::NoGradGuard no_grad; // has to be on each thread
                     auto dev_name = this->devices[worker_id];
                     spdlog::info("Starting predict task on {}", dev_name);
-                    thread_local auto device = torch::Device(dev_name);
-                    thread_local auto model = this->models[worker_id];
+                    auto device = torch::Device(dev_name);
+                    auto& model = this->models[worker_id];
+                    // ^^ concretizing model to make sure the forward() call is directly on the model without glue layers
+                    // because I am not sure if the glue layers forward batches by ref or by value (i.e copy)
+                    auto& queue = mloader.mini_batch_queue;
                     while (true) {
                         std::unique_lock<std::mutex> lock(mloader.mutex);
-                        mloader.cv.wait(lock, [&] {return !mloader.mini_batch_queue.empty() || mloader.status.is_done(); });
-                        if (mloader.status.is_done() && mloader.mini_batch_queue.empty()) {
+                        mloader.cv.wait(lock, [&] {return !queue.empty() || mloader.status.is_done(); });
+                        if (mloader.status.is_done() && queue.empty()) {
                             break;
                         }
-                        auto batch = mloader.mini_batch_queue.front();
-                        mloader.mini_batch_queue.pop();
+                        auto batch = queue.front();
+                        queue.pop();
                         lock.unlock();
                         mloader.cv.notify_one();
 
@@ -150,7 +164,13 @@ namespace tahoma::inference {
                             {"input", inps},
                             {"input_mask", mask},
                         };
-                        auto out = model->forward(inps_pack);
+                        Pack out;
+                        try {
+                            out = model->forward(inps_pack);
+                        } catch(const c10::OutOfMemoryError& e) {
+                            auto err_msg = fmt::format("OOM error on worker {}. input_size: {}; Inner exception what: {} ", worker_id, fmt::join(inps.sizes(), ", "), e.what());
+                            throw std::runtime_error(err_msg); 
+                        }
                         auto scores = std::any_cast<torch::Tensor>(out["result"]);
                         for (int i = 0; i < scores.size(0); ++i) {
                             auto ex = batch.examples[i];
@@ -158,6 +178,8 @@ namespace tahoma::inference {
                             string line = fmt::format("{:.6f}", scores[i].item<float>());
                             collector.put(ex.id, line);
                         }
+                        // destroy the batch before the next iteration
+                        //batch.clear();
                     }
                     spdlog::info("Worker {} finished", worker_id);
                     });
@@ -183,6 +205,19 @@ namespace tahoma::inference {
             devices.push_back(torch::Device(torch::kCPU).str());
         }
         spdlog::info("Devices: {}", fmt::join(devices, ", "));
+        // disable autograd and enable inference mode
+        c10::InferenceMode guard;
+        torch::NoGradGuard no_grad;
+        bool use_fp16 = kwargs.get("fp16", false);
+        if (use_fp16) {
+            if (!torch::cuda::is_available()) {
+                spdlog::warn("FP16 is not supported on CPU");
+            } else {
+                spdlog::info("Enabling FP16");
+                torch::autocast::set_autocast_enabled(at::kCUDA, true);
+            }
+        }
+
         if (model_name == "MT5ForRegression") {
             auto predictor = Predictor(config, weights, kwargs, devices);
             predictor.predict_scores(input_file, "-");

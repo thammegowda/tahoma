@@ -22,7 +22,7 @@ namespace tahoma::data {
     using IdRawExample = std::pair<size_t, RawExample>;
     struct Example {
         size_t id;
-        vector<str> fields;
+        vector<std::string> fields;
         vector2d<i32> field_ids;
 
         ~Example() = default;
@@ -59,11 +59,16 @@ namespace tahoma::data {
         std::vector<Tensor> fields;
 
         Batch(std::vector<Example> examples, bool contiguous = false);
+        
+        ~Batch()=default;
         static auto to_tensors(std::vector<Example> examples) -> std::vector<torch::Tensor>;
         auto contiguous() -> Batch&;
         auto to(torch::Device& device) -> Batch&;
         auto size() -> i32;
-        ~Batch() = default;
+        void clear(){
+            examples.clear();
+            fields.clear();
+        }
     };
 
     struct DataLoader {

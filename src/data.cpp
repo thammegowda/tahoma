@@ -475,6 +475,7 @@ namespace tahoma::data {
                     lock.unlock();
                     cv.notify_all();
                 }
+                count++;
             }
             {
                 std::unique_lock<std::mutex> lock(mutex);
