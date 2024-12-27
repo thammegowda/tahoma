@@ -57,17 +57,25 @@ def file_md5(file_path) -> str:
 def hf_to_torchscript(model_id, out_file, task_type):
     assert not out_file.exists(), f'File {out_file} already exists. Not overwriting.'
     assert task_type == TaskType.TEXT_GENERATION, f'Only {TaskType.TEXT_GENERATION} is supported.'
-    pipe = transformers.pipeline(model=hf_model_id, framework="pt")
+    pipe = transformers.pipeline(model=model_id, framework="pt")
     examples = []
     if task_type == TaskType.TEXT_GENERATION:
-        ex = pipe.tokenizer("Hello, world!", return_tensors="pt")
-        examples.append((ex["input_ids"], ex["attention_mask"]))
+        ex = pipe.tokenizer("Hello, world! How are", return_tensors="pt")
+        ex['decoder_input_ids'] = torch.zeros_like(ex['input_ids'])[:, :1]
+        ex['return_dict'] = True
+        #examples.append((ex["input_ids"], ex["attention_mask"]))
+        examples.append(ex)
     else:
         raise NotImplementedError(f'Unsupported task type: {task_type}')
-    print(examples)
-    scripted_model = torch.jit.script(pipe.model, example_inputs=examples)
+
+    #log.info(f'torch.compile on model')
+    #model = torch.compile(model)
+    #print(model(**examples[0]))
+
+    scripted_model = torch.jit.script(model, example_inputs=examples)
     out_file.resolve().parent.mkdir(parents=True, exist_ok=True)
     torch.jit.save(scripted_model, str(out_file))
+
 
 def str_as_array(s) -> np.ndarray:
     """Some npz readers do not support strings e.g. cnpy
@@ -112,10 +120,10 @@ def load_torch_weights_sharded(model_id, map_location=None):
 
 def load_torch_state(args) -> dict:
     try: 
-        weights_file = hf_hub.hf_hub_download(repo_id=args.model, filename=WEIGHTS_NAME)
+        weights_file = hf_hub.hf_hub_download(repo_id=args.model, filename=args.name)
         return load_torch_weights(weights_file)
     except Exception as e:
-        log.warning(f'Failed to load weights from {WEIGHTS_NAME}.', e)
+        log.warning(f'Failed to load weights from {args.name}.', e)
 
     try:
         log.info(f'Attempting shard index {WEIGHTS_INDEX_NAME}')
@@ -177,16 +185,26 @@ def pth_to_npz(args):
 
 def main():
     args = parse_args()
-    
-    if not args.output.name.endswith('.npz'):
-        # assume it is a directory
-        ext = args.output.name.split('.')[-1]
-        assert ext.lower() not in ('.pth', '.bin'), \
-            f'Output file should be .npz extension. Avoid {ext}. Or just use directory and let me create the file inside it.'
-        args.output = args.output / "model.npz"
-        log.info(f'Output file is {args.output}')
-    #hf_to_torchscript(args.model, args.output, args.type)
-    pth_to_npz(args)
+    if args.format == 'npz':
+        if not args.output.name.endswith('.npz'):
+            # assume it is a directory
+            ext = args.output.name.split('.')[-1]
+            assert ext.lower() not in ('.pth', '.bin'), \
+                f'Output file should be .npz extension. Avoid {ext}. Or just use directory and let me create the file inside it.'
+            args.output = args.output / "model.npz"
+            log.info(f'Output file is {args.output}')
+        pth_to_npz(args)
+    elif args.format == 'torchscript':
+        if not args.output.name.endswith('.pth'):
+            # assume it is a directory
+            ext = args.output.name.split('.')[-1]
+            assert ext.lower() not in ('.npz', '.bin'), \
+                f'Output file should be .pth extension. Avoid {ext}. Or just use directory and let me create the file inside it.'
+            args.output = args.output / "model.pth"
+            log.info(f'Output file is {args.output}')
+        hf_to_torchscript(args.model, args.output, args.type)
+    else:
+        raise NotImplementedError(f'Unsupported format {args.format}')
 
     vocab_file_names = ['spiece.model', 'sentencepiece.bpe.model']
     for name in vocab_file_names:
@@ -202,10 +220,11 @@ def main():
 def parse_args():
     parser = argparse.ArgumentParser(description='Converts an huggingface model to .npz compatible format.')
     parser.add_argument('-m', '--model', type=str, help='Hgginface model ID or local path to model Id', required=True)
-    parser.add_argument('-f', '--file', type=str, help='File inside the HF model repository', default="pytorch_model.bin")
+    parser.add_argument('-n', '--name', type=str, help='File inside the HF model repository', default=WEIGHTS_NAME)
     parser.add_argument('-t', '--type', default="text-generation",
                         help='Pipeline type. Used to make example input for tracing torchscript from the pipeline.')
     parser.add_argument('-o', '--output', type=Path, help='Output file path', required=True)
+    parser.add_argument('-f', '--format', choices=['npz', 'torchscript'], default='npz', help='Output format')
     return parser.parse_args()
 
 if __name__ == '__main__':

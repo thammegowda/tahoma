@@ -231,7 +231,7 @@ namespace tahoma::data {
     }
 
     auto DataLoader::sort_examples(Generator<Example> examples, size_t buffer_size,
-        size_t sort_field, bool reverse) -> Generator<Example> {
+        std::function<int64_t(const Example&)> key_func, bool reverse) -> Generator<Example> {
         std::vector<Example> buffer;
         std::vector<size_t> keys(buffer_size);   // sort keys
         std::vector<size_t> indices(buffer_size);
@@ -248,7 +248,7 @@ namespace tahoma::data {
             idx++;
             buffer.push_back(ex);
             indices[idx] = idx;
-            keys[idx] = ex.field_ids[sort_field].size();
+            keys[idx] = key_func(ex);
             if (buffer.size() == buffer_size) {
                 std::sort(indices.begin(), indices.end(), compare);
                 for (auto i : indices) {
@@ -360,6 +360,7 @@ namespace tahoma::data {
     auto DataLoader::get_data_async(std::string dataset_name, size_t num_threads) -> Generator<Batch> {
 
         auto loader = MultiThreadedLoader(*this, config[dataset_name], {});
+        loader.sort_by = config[dataset_name]["sort_by"].as<std::string>("random");
         loader.start(num_threads);
 
         for (auto batch : loader.generator()) {
@@ -401,8 +402,12 @@ namespace tahoma::data {
         if (all_threads.size() > 0) {
             throw std::runtime_error("Threads already started");
         }
-        spdlog::info("Starting data loader with {} threads; \n\tdata_paths: {},\n\tmaxi_batch: {},\n\tmini_batch: {}\n\tmax_length_crop: {}\n\tmax_lengths: {}",
-            num_threads, fmt::join(data_paths, ", "), maxi_batch, mini_batch, max_length_crop, fmt::join(max_lengths, ", "));  
+        spdlog::info(("Starting data loader with {} threads;"
+        "\n\tdata_paths: {},\n\tmaxi_batch: {},\n\tmini_batch: {}"
+        "\n\tmax_length_crop: {}\n\tmax_lengths: {}\n\tsort_by: {}"),
+            num_threads, fmt::join(data_paths, ", "),
+            maxi_batch, mini_batch, max_length_crop,
+            fmt::join(max_lengths, ", "), sort_by);  
         //=================================================//
         auto maxi_batch_task = [&](const std::stop_token& stoken){
             spdlog::info("Reader thread started");
@@ -416,12 +421,10 @@ namespace tahoma::data {
                         }
                     }
                 }
-                //spdlog::debug("Maxi batch {} size: {}. Going to wait for a lock", count, maxi_batch.size());
                 {
                     std::unique_lock<std::mutex> lock(mutex);
                     cv.wait(lock, [&]{ return stoken.stop_requested() || maxi_batch_queue.size() < max_queue_size; });
                     if (stoken.stop_requested()) { break; }
-                    //spdlog::debug("Maxi batch thread pushing  {}", count);
                     maxi_batch_queue.push(maxi_batch);
                     count++;
                 }
@@ -457,11 +460,27 @@ namespace tahoma::data {
                 spdlog::debug("worker {}: maxi_batch_count: {} maxi_buffer_size: {}", worker_id, count, maxi_batch.size());
                 auto maxi_gen = vector_to_generator<IdRawExample>(std::move(maxi_batch));
                 auto examples = loader.read_examples(std::move(maxi_gen), max_lengths, max_length_crop, add_eos);
-                if (sort_by == "random") {
-                    examples = loader.buffered_shuffle(std::move(examples), maxi_buffer_size);
-                } else if (sort_by == "length") {
-                    const size_t sort_field = 0; // sort by the first field
-                    examples = loader.sort_examples(std::move(examples), maxi_buffer_size, sort_field, /*reverse*/true);
+                if (maxi_buffer_size > mini_batch) {
+                    if (sort_by == "random") {
+                        examples = loader.buffered_shuffle(std::move(examples), maxi_buffer_size);
+                    } else if (sort_by == "length") {
+                        const size_t sort_field = 0; // sort by the first field
+                        std::function<int64_t(const Example&)> key_func = [&](const Example& ex) {
+                            return ex.field_ids[sort_field].size();
+                        };
+                        examples = loader.sort_examples(std::move(examples), maxi_buffer_size, key_func, /*reverse*/true);
+                    } else if (sort_by == "random_approx_length") {
+                        // use for training sequence-to-sequence models, where we want to approximate length and randomize
+                        std::function<int64_t(const Example&)> key_func = [&](const Example& ex) {
+                            const size_t last_field = ex.field_ids.size() - 1;
+                            return ex.field_ids[last_field].size() + std::rand() % 5;
+                        };
+                        examples = loader.sort_examples(std::move(examples), maxi_buffer_size, key_func, /*reverse*/true);
+                    } else {
+                        throw std::runtime_error("Unknown sort_by value: " + sort_by);
+                    }
+                } else {
+                    spdlog::warn("maxi_buffer_size <= mini_batch; ignoring sort_by={}", sort_by);
                 }
 
                 auto batches = loader.make_batches(std::move(examples), mini_batch);

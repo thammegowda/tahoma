@@ -44,9 +44,8 @@ namespace tahoma::layer::transformer {
             // insert head dim
             //key_padding_mask = key_padding_mask.unsqueeze(1); // [batch_size, 1, 1, src_len]
             if (key_padding_mask.sizes().size() != 4){ // must be a 4D tensor
-                std::string _shape = "";
-                for (auto i : key_padding_mask.sizes()) { _shape += std::to_string(i) + ", "; }
-                throw std::runtime_error("key_padding_mask must be a 4D tensor. given: [" +  _shape + "]");
+                auto msg = fmt::format("key_padding_mask must be a 4D tensor. given: [{}]", fmt::join(key_padding_mask.sizes(), ", "));
+                throw std::runtime_error(msg);
             }
             float low_val = -1e9;
             if (at::autocast::is_autocast_enabled(query.device().type())){

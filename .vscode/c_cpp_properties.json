@@ -8,7 +8,8 @@
                 "${workspaceFolder}/libs/libtorch-cpu/include/torch/csrc/api/include",
                 "${workspaceFolder}/libs/yaml-cpp/include",
                 "${workspaceFolder}/libs/sentencepiece/",
-                "${workspaceFolder}/include"
+                "${workspaceFolder}/libs/argparse/",
+                "${workspaceFolder}/src/include"
             ],
             "defines": [],
             "intelliSenseMode": "linux-gcc-x64",

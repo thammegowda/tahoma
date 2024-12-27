@@ -92,7 +92,7 @@ namespace tahoma::data {
 
         //template <typename T>
         auto buffered_shuffle(Generator<Example> examples, size_t buffer_size) -> Generator<Example>;
-        auto sort_examples(Generator<Example> examples,  size_t buffer_size, size_t sort_field, bool reverse=false) -> Generator<Example>;
+        auto sort_examples(Generator<Example> examples,  size_t buffer_size, std::function<int64_t(const Example&)> key_func, bool reverse=false) -> Generator<Example>;
         auto make_batches(Generator<Example> examples, size_t batch_size, bool contiguous = false) -> Generator<Batch>;
         auto get_train_data(size_t n_data_threads = 1) -> Generator<Batch>;
         auto get_validation_data() -> Generator<Batch>;

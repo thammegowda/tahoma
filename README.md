@@ -41,10 +41,12 @@ sudo apt install gcc-12 g++-12 cmake build-essential pkg-config libgoogle-perfto
 
 ```bash
 # build using cmake and default compiler
-cmake . -B build -DUSE_CUDA=on -DCOMPILE_TESTS=on
-cmake --build build -j
+OUT=build
+cmake . -B $OUT -DUSE_CUDA=on -DCOMPILE_TESTS=on -DCMAKE_INSTALL_PREFIX=$OUT/install
+cmake --build build --target install -j
 
-build/tahoma -h 
+$OUT/tahoma -h 
+$OUT/install
 ```
 
 ## Metrics
@@ -96,6 +98,24 @@ ctest -V --test-dir build/tests
 ## Build LibTorch from Source
 
 This project relies on libTorch. It'd be useful to know how to build libTorch
+
+```bash
+git clone --depth 1 -j 8 --recurse-submodules --shallow-submodules https://github.com/pytorch/pytorch.git
+cd pytorch
+# Option 1: CPU only static build; output in build_mobile/install 
+bash scripts/build_mobile.sh
+
+# option 2: build with CUDA support : dynamic linked
+bash scripts/build_local.sh
+
+# option 3: direct and the pro-mode 
+OUT=build-tg-cpu; cmake -B$OUT -DBUILD_SHARED_LIBS=OFF -DUSE_CUDA=off -DBUILD_PYTHON=off -DBUILD_TEST=OFF -DBUILD_BINARY=OFF -DBUILD_CUSTOM_PROTOBUF=OFF -DCMAKE_INSTALL_PREFIX=$OUT/install
+OUT=build; 
+cmake -B$OUT -DBUILD_SHARED_LIBS=OFF -DUSE_CUDA=off -DBUILD_PYTHON=off -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$OUT/install
+cmke --build $OUT --target install -j
+# $OUT/install has libtorch; 
+
+```
 
 
 ## Developer Notes
