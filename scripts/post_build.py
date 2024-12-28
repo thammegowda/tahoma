@@ -55,7 +55,7 @@ def main():
         log.warning('patchelf not found. Please install it to fix the rpath. or use LD_LIBRARY_PATH at runtime')
     if args.archive:
         basename = f'tahoma-{args.version}'
-        archive_file: Path = install_dir.parent / f'{basename}.tar.gz'
+        archive_file: Path = install_dir.parent / f'{basename}.tgz'
         # TODO: make the top level dir in the archive to be tahoma-<version>
         cmd = f'cd {install_dir} && tar -czvf {archive_file} *'
         log.info(f'Archiving to {archive_file}:\n\t{cmd}')

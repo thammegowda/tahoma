@@ -108,8 +108,8 @@ namespace tahoma::train {
             auto duration_ms = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start_time);
             auto toks_rate = 1000.0f * tot_tokens / duration_ms.count();
             auto sents_rate = 1000.0f * tot_sents / duration_ms.count();
-            return fmt::format("{} Step: {}; Loss: {:.5f}; AvgLoss: {:.5f}; sents: {}; toks: {}, speed: {:.1f} tok/s {:.1f} sent/s LR: {:.5f}",
-                name, step_num, cur_loss, avg_loss(), tot_sents, tot_tokens, toks_rate, sents_rate, cur_lr);
+            return fmt::format("{} Step: {:L}; Loss: {:.5f}; AvgLoss: {:.5f}; sents: {:L}; toks: {:L}, speed: {:L} tok/s {:L} sent/s LR: {:.5f}",
+                name, step_num, cur_loss, avg_loss(), tot_sents, tot_tokens, (int64_t) toks_rate, (int64_t) sents_rate, cur_lr);
         }
 
 }

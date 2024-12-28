@@ -1,5 +1,6 @@
 #include <tahoma/utils.h>
-#include  <tahoma/model/mt5.h>
+#include <tahoma/model/mt5.h>
+#include <tahoma/utils.h>
 
 using namespace tahoma;
 namespace tahoma::model::mt5 {
@@ -147,7 +148,6 @@ namespace tahoma::model::mt5 {
         auto qs = q(query).view({ batch_size, -1, n_heads, d_kv }).transpose(1, 2);
         auto ks = k(docs).view({ batch_size, -1, n_heads, d_kv }).transpose(1, 2);
         auto vs = v(docs).view({ batch_size, -1, n_heads, d_kv }).transpose(1, 2);
-
         auto attn_weights = torch::matmul(qs, ks.transpose(3, 2));
 
         // position_bias gets computed on the first layer and reused in subsequent layers
@@ -162,7 +162,7 @@ namespace tahoma::model::mt5 {
         }
 
         if (mask.defined()) {
-            attn_weights = attn_weights.masked_fill(mask, -1e9);
+            attn_weights = attn_weights.masked_fill(mask, -pow(2, attn_weights.dtype() == torch::kHalf ? 14 : 30));
         }
         attn_weights = F::softmax(attn_weights, -1);
         attn_weights = dropout(attn_weights);
@@ -300,7 +300,7 @@ namespace tahoma::model::mt5 {
             }
             idx++;
         }
-        Tensor hidden_states = std::any_cast<Tensor>(args["input"]);
+        Tensor hidden_states = args.get<>("input");
         hidden_states = final_layer_norm(hidden_states);
         hidden_states = dropout(hidden_states);
         return { {"result", hidden_states} };

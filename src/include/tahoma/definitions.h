@@ -72,9 +72,12 @@ namespace tahoma {
                 return fallback;
             }
         }
-        auto as_tensor(const std::string& key) -> Tensor {
-            return std::any_cast<Tensor>(this->at(key));
+
+        template <typename T=Tensor>
+        auto get(const std::string& key) -> T {
+            return std::any_cast<T>(this->at(key));
         }
+
     };
 
     using TensorPack = std::map<std::string, torch::Tensor>;

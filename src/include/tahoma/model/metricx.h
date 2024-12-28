@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tahoma/model/mt5.h>
+#include <tahoma/common/auto_cast.h>
 
 
 using namespace tahoma;
@@ -41,8 +42,7 @@ namespace tahoma::model::metricx {
                 {"input", src_emb},
                 {"input_mask", input_mask}
             };
-            auto memory = std::any_cast<Tensor>(encoder(enc_args)["result"]);
-
+            auto memory = encoder(enc_args).get<Tensor>("result");
             auto tgt_seq = torch::zeros({ input.size(0), 1 }, torch::dtype(torch::kLong).device(input.device()));
             Pack dec_args = {
                 {"input", shared(tgt_seq)},
@@ -50,20 +50,17 @@ namespace tahoma::model::metricx {
                 {"memory", memory},
                 {"memory_mask", input_mask}
             };
-            auto dec_out = std::any_cast<Tensor>(decoder(dec_args)["result"]);
-            // TODO: optimize lm_head to only compute cls_tok_id
-            // 250089 = <extra_id_10>
-            //predictions = lm_logits[:, 0, 250089]
-            // if tie_word_embeddings:
-            // # Rescale output before projecting on vocab
-            // # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
-            //    sequence_output = sequence_output * (self.model_dim**-0.5)
+
+            // decoder values go out of fp16 range and cause NaNs, we autocast encoder and not for decoder
+            AutoCastGuard guard(src_emb.device().type(), false);
+            auto dec_out = decoder(dec_args).get<Tensor>("result");
             if (tie_word_embeddings) {
+            // # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
                 dec_out = dec_out * (std::pow(model_dim, -0.5));
             }
-
-            auto lm_out = lm_head(dec_out);
-            auto predictions = lm_out.index({ Slice(), 0, cls_tok_id });
+            dec_out = dec_out.index({ Slice(), 0, Slice() }); // [B x D]  // the first token repr
+            auto final_weights = lm_head->weight.index({cls_tok_id, Slice()}).unsqueeze(1);  // [D x 1]
+            auto predictions = torch::matmul(dec_out, final_weights).squeeze(1);  // [BxD] [Dx1] = [Bx1] = [B]
             predictions = torch::clamp(predictions, 0, 25);
             return { {"result", predictions} };
         }

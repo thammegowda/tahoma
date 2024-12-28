@@ -6,7 +6,8 @@
 #include <tahoma/data.h>
 #include <tahoma/model/metricx.h>
 #include <tahoma/serialize.h>
-#include <ATen/autocast_mode.h>  
+#include <c10/core/InferenceMode.h>
+#include <tahoma/common/auto_cast.h>  
 
 namespace tahoma::inference {
 
@@ -96,7 +97,7 @@ namespace tahoma::inference {
                     auto dev_name = devices[idx];
                     spdlog::info("Initializing model on {}", dev_name);
                     torch::Device device(dev_name);
-                     torch::NoGradGuard no_grad;
+                    c10::InferenceMode guard;
                     auto model = utils::init_model(config, device);
                     model->set_state(weights);
                     model->eval();
@@ -131,17 +132,14 @@ namespace tahoma::inference {
             std::vector<std::jthread> threads;
             for (size_t worker_id = 0; worker_id < devices.size(); ++worker_id) {
                 auto t = std::jthread([&, worker_id, pad_id] {
-                    if(this->use_fp16 && torch::cuda::is_available()) {
-                        if (worker_id == 0) { // log only once
-                            spdlog::info("Enabling FP16");
-                        }
-                        //TODO: check if highlevel torch::autocast api exists. ATen is low level and not recommended 
-                        at::autocast::set_autocast_enabled(at::kCUDA, true);
-                    }
-                    torch::NoGradGuard no_grad; // has to be on each thread
                     auto dev_name = this->devices[worker_id];
                     spdlog::info("Starting predict task on {}", dev_name);
                     auto device = torch::Device(dev_name);
+                    auto autocast_guard = AutoCastGuard(device.type(), use_fp16 && torch::autocast::is_autocast_enabled(device.type()));
+                    if (autocast_guard.is_enabled() && worker_id == 0) { 
+                        spdlog::info("Enabled FP16");
+                    }
+                    c10::InferenceMode guard; // has to be on each thread
                     auto& model = this->models[worker_id];
                     // ^^ concretizing model to make sure the forward() call is directly on the model without glue layers
                     // because I am not sure if the glue layers forward batches by ref or by value (i.e copy)
@@ -178,8 +176,6 @@ namespace tahoma::inference {
                             string line = fmt::format("{:.6f}", scores[i].item<float>());
                             collector.put(ex.id, line);
                         }
-                        // destroy the batch before the next iteration
-                        //batch.clear();
                     }
                     spdlog::info("Worker {} finished", worker_id);
                     });
