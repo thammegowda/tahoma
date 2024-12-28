@@ -34,15 +34,18 @@ set(PYTHON_EXECUTABLE python CACHE FILEPATH "Python executable name path. Used t
 find_package(Git QUIET)
 
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release)
+    set(CMAKE_BUILD_TYPE ReleaseDebug)  # retain debug info, but optimize for performance
 endif()
 
-if(CMAKE_BUILD_TYPE MATCHES Debug)
+if(CMAKE_BUILD_TYPE MATCHES ReleaseDebug)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -ggdb3 -O3")
+    message(STATUS "CMAKE_BUILD_TYPE=ReleaseDebug. Flags are set to retain the most debug info and optimized for performance")
+elseif(CMAKE_BUILD_TYPE MATCHES Debug)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -ggdb3 -O0")
     message(STATUS "CMAKE_BUILD_TYPE=Debug. Flags are set to retain the most debug info and disabled all optimizations")
 elseif(CMAKE_BUILD_TYPE MATCHES Release)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
-    message(STATUS "CMAKE_BUILD_TYPE=Release. Flags set to optimize for performance")
+    message(STATUS "CMAKE_BUILD_TYPE=Release. Flags set to optimize for performance and disabled all debug info")
 else()
     message(FATAL_ERROR "Unknown build type: ${CMAKE_BUILD_TYPE}")
 endif()
