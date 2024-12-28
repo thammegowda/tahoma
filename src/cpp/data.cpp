@@ -411,7 +411,8 @@ namespace tahoma::data {
         //=================================================//
         auto maxi_batch_task = [&](const std::stop_token& stoken){
             spdlog::info("Reader thread started");
-            size_t count = 0;
+            size_t maxi_count = 0;
+            size_t item_count = 0;
             for (auto maxi_batch : read_lines_buffered(data_paths, maxi_buffer_size)) {
                 if (!input_mappers.empty()) {
                     // map input fields using input_mappers
@@ -426,7 +427,8 @@ namespace tahoma::data {
                     cv.wait(lock, [&]{ return stoken.stop_requested() || maxi_batch_queue.size() < max_queue_size; });
                     if (stoken.stop_requested()) { break; }
                     maxi_batch_queue.push(maxi_batch);
-                    count++;
+                    maxi_count++;
+                    item_count += maxi_batch.size();
                 }
                 cv.notify_one();
             }
@@ -435,7 +437,7 @@ namespace tahoma::data {
                 status.reader_done = true;
             }
             cv.notify_all();
-            spdlog::info("Maxi batching thread done");
+            spdlog::info("Maxi batching thread done; maxi batches: {}; total items: {}", maxi_count, item_count);
         };
 
         //=================================================//
@@ -480,7 +482,9 @@ namespace tahoma::data {
                         throw std::runtime_error("Unknown sort_by value: " + sort_by);
                     }
                 } else {
-                    spdlog::warn("maxi_buffer_size <= mini_batch; ignoring sort_by={}", sort_by);
+                    if (count == 0) {
+                        spdlog::warn("maxi_buffer_size <= mini_batch; ignoring sort_by={}", sort_by);
+                    }
                 }
 
                 auto batches = loader.make_batches(std::move(examples), mini_batch);
