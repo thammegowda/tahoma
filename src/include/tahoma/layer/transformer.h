@@ -28,8 +28,7 @@ namespace tahoma::layer::transformer {
         }
 
         auto forward(torch::Tensor x) -> torch::Tensor {
-            x = embedding(x) * std::sqrt(model_dim);
-            x = x + positions.index({ Slice(), Slice(None, x.size(1)) });
+            x = embedding(x) * std::sqrt(model_dim) + positions.index({ Slice(), Slice(None, x.size(1)) });
             return dropout(x);
         }
     };
@@ -73,7 +72,7 @@ namespace tahoma::layer::transformer {
             nhead{ nhead }
         {}
 
-        auto forward(torch::Tensor query, torch::Tensor key, torch::Tensor value, torch::Tensor key_padding_mask)
+        auto forward(torch::Tensor query, torch::Tensor key, torch::Tensor value, torch::Tensor key_mask)
             -> std::pair<torch::Tensor, torch::Tensor>;
     };
     TORCH_MODULE(MultiheadAttention);

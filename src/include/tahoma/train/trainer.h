@@ -29,9 +29,10 @@ namespace tahoma::train {
     protected:
         fs::path _work_dir;
         config::Config _config;
-        std::shared_ptr<model::LanguageModel> _model;
         TaskType _task_type;
-        //nn::AnyModule _model;
+
+        torch::Device _device = DEVICE;
+        std::shared_ptr<model::LanguageModel> _model;
         nn::AnyModule _projector;
         std::shared_ptr<optim::Optimizer> _optimizer;
         std::shared_ptr<LRScheduler> _scheduler;
@@ -41,7 +42,6 @@ namespace tahoma::train {
         int64_t _pad_id = 0;
         int64_t _bos_id = 1;
         std::shared_ptr<LossComputer> _loss_computer;
-        torch::Device _device;
         data::Batch _sample_batch;
         Stopper _stopper;
 
