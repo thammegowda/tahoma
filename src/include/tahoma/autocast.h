@@ -1,12 +1,14 @@
-#include <tahoma.h>
+#pragma once
+
 #include <ATen/autocast_mode.h>
+#include <tahoma.h>
 
 
 namespace tahoma {
 
     /**
      * @brief A guard to enable or disable autocast for a device
-     * 
+     *
      * This class is used to enable or disable autocast for a device. It is used to temporarily enable or disable autocast
      */
     class AutoCastGuard {
@@ -16,12 +18,11 @@ namespace tahoma {
         bool current_flag = false;
     public:
         AutoCastGuard() = default;
-        AutoCastGuard(torch::DeviceType device_type, bool enabled=false):
+        AutoCastGuard(torch::DeviceType device_type, bool enabled = false) :
             device_type(device_type),
             previous_flag(torch::autocast::is_autocast_enabled(device_type)),
-            current_flag(enabled)
-        {
-            if (current_flag != previous_flag){
+            current_flag(enabled) {
+            if (current_flag != previous_flag) {
                 torch::autocast::set_autocast_enabled(device_type, current_flag);
             }
         }
@@ -30,7 +31,7 @@ namespace tahoma {
         }
 
         ~AutoCastGuard() {
-            if (current_flag != previous_flag){
+            if (current_flag != previous_flag) {
                 // restore the previous state
                 torch::autocast::set_autocast_enabled(device_type, previous_flag);
             }

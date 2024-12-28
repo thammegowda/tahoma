@@ -1,7 +1,7 @@
 #pragma once
 
 #include <tahoma/model/mt5.h>
-#include <tahoma/common/auto_cast.h>
+#include <tahoma/autocast.h>
 
 
 using namespace tahoma;

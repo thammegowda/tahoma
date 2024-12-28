@@ -7,7 +7,7 @@
 #include <tahoma/model/metricx.h>
 #include <tahoma/serialize.h>
 #include <c10/core/InferenceMode.h>
-#include <tahoma/common/auto_cast.h>  
+#include <tahoma/autocast.h>  
 
 namespace tahoma::inference {
 
