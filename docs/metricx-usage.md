@@ -34,8 +34,8 @@ batch_size=64   # for large
 if [[ $MODEL =~ -xl ]]; then batch_size=16;
 elif [[ $MODEL =~ -xxl ]]; then batch_size=8;
 
-m="$MODELS_CACHE/$model_name/model.npz"
-v="$MODELS_CACHE/$model_name/spiece.model"
+m="$MODELS_CACHE/$MODEL/model.npz"
+v="$MODELS_CACHE/$MODEL/spiece.model"
 max_length=1024
 
 # maps STDIN TSV to STDOUT
