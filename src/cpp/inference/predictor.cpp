@@ -77,13 +77,13 @@ namespace tahoma::inference {
     struct Predictor {
 
         config::Config config;
-        vector<string> vocab_paths;
         Pack options;  // runtime options from CLI
         std::vector<string> devices;
+        vector<string> vocab_paths;
+        data::DataLoader data_loader;
         std::vector<Ptr<model::LanguageModel>> models;
         bool use_fp16 = false;
 
-        data::DataLoader data_loader;
         Predictor(config::Config config, Pack weights, Pack options, std::vector<string> devices) :
             config(config),
             options(options),

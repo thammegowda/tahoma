@@ -82,7 +82,7 @@ int main(int argc, char* argv[]) {
     }
     if (torch::cuda::is_available()) {
         std::vector<std::string> device_ids;
-        for (auto i = 0; i < torch::cuda::device_count(); i++) {
+        for (size_t i = 0; i < torch::cuda::device_count(); i++) {
             device_ids.push_back(fmt::format("{}", i));
         }
         spdlog::info("CUDA devices: {}", fmt::join(device_ids, ", "));

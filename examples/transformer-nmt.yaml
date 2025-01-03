@@ -31,14 +31,14 @@ schema:
     - sequence
     - sequence
   vocabs:
-    - data/eng-kan/vocab.joint.8k.model
-    - data/eng-kan/vocab.joint.8k.model
+    - data/eng-deu/vocab.joint.8k.model
+    - data/eng-deu/vocab.joint.8k.model
   shared_vocabs: true
 
 trainer:
   data:
-    - data/eng-kan/train.kan
-    - data/eng-kan/train.eng
+    - data/eng-deu/train.deu
+    - data/eng-deu/train.eng
   mini_batch: 32
   maxi_batch: 10
   epochs: 100000
@@ -51,6 +51,7 @@ trainer:
   data_threads: 8
   log_frequency: 50u
   #log_frequency: 1u
+  smoke_test: true
   log_first: 5
 
   criterion:
@@ -62,8 +63,8 @@ trainer:
 validator:
   frequency: 500
   data:
-    - data/eng-kan/dev.kan
-    - data/eng-kan/dev.eng
+    - data/eng-deu/dev.100.deu
+    - data/eng-deu/dev.100.eng
   batch_size: 8
   criteria:
     - name: cross_entropy

@@ -97,8 +97,9 @@ namespace tahoma {
 
     inline int global_setup() {
 
+        std::locale::global(std::locale(std::getenv("LC_ALL") ? std::getenv("LC_ALL") : "en_US.UTF-8"));
         spdlog::set_default_logger(spdlog::stderr_color_mt("console"));
-        spdlog::set_pattern("[%Y%m%d %H:%M:%S.%e] [t%t] [%^%l%$] %v");
+        spdlog::set_pattern("[%C%m%d %H:%M:%S|t%t][%^%l%$] %v");
         spdlog::set_level(spdlog::level::info);
         spdlog::debug("Global setup started");
         backward::SignalHandling sh;
@@ -116,5 +117,20 @@ namespace tahoma {
         NMT,
         REGRESSION,
     };
+    
+    // agggh! hack to get enums cant have to_string method
+    inline auto task_type_string(TaskType taskType) -> std::string {
+        
+        switch (taskType) {
+            case TaskType::LM:
+                return "LM";
+            case TaskType::NMT:
+                return "NMT";
+            case TaskType::REGRESSION:
+                return "REGRESSION";
+            default:
+                return "UNKNOWN";
+        }
+    }
 
 } // namespace tahoma

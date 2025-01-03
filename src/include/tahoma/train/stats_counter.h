@@ -10,6 +10,8 @@ using namespace tahoma;
 namespace tahoma::train {
 
     struct StatsCounter {
+        std::string name = "";
+        i64 log_first = 0;
         i64 step_num = 0;
         i64 tot_sents = 0;
         i64 tot_tokens = 0;
@@ -21,13 +23,11 @@ namespace tahoma::train {
         i64 log_frequency_step = -1;
         i64 log_frequency_tokens = -1;
         i64 log_frequency_time_sec = -1;
-        i64 log_first = 0;
 
         i64 last_log_step = 0;
         i64 last_log_tokens = 0;
         std::chrono::time_point<std::chrono::high_resolution_clock> last_log_time = std::chrono::high_resolution_clock::now();
         std::chrono::time_point<std::chrono::high_resolution_clock> start_time = std::chrono::high_resolution_clock::now();
-        std::string name = "";
 
         StatsCounter() = default;
         StatsCounter(std::string log_frequency, std::string name = "", i64 log_first = 0)

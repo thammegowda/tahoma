@@ -2,13 +2,12 @@
 	path = libs/spdlog
 	url = https://github.com/gabime/spdlog.git
 	branch = v1.x
-[submodule "libs/sentencepiece"]
-	path = libs/sentencepiece
-	url = https://github.com/google/sentencepiece.git
-	branch = master
 [submodule "libs/backward-cpp"]
 	path = libs/backward-cpp
 	url = https://github.com/bombela/backward-cpp.git
 [submodule "libs/yaml-cpp"]
 	path = libs/yaml-cpp
 	url = https://github.com/jbeder/yaml-cpp.git
+[submodule "libs/sentencepiece"]
+	path = libs/sentencepiece
+	url = https://github.com/marian-nmt/sentencepiece.git

@@ -277,12 +277,8 @@ namespace tahoma::model::mt5 {
         dropout{ register_module("dropout", nn::Dropout(config["dropout_rate"].as<float>())) }
     {
         size_t num_layers = config[is_decoder ? "num_decoder_layers" : "num_layers"].as<size_t>();
-        size_t model_dim = config["d_model"].as<size_t>();
-        size_t ff_dim = config["d_ff"].as<size_t>();
-        size_t n_heads = config["num_heads"].as<size_t>();
-        float dropout_rate = config["dropout_rate"].as<float>();
 
-        for (int idx = 0; idx < num_layers; idx++) {
+        for (size_t idx = 0; idx < num_layers; idx++) {
             bool has_rel_pos_emb = idx == 0; // only the first layer has relative position embedding
             block->push_back(Block(config, has_rel_pos_emb, is_decoder, idx));
         }

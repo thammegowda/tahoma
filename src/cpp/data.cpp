@@ -48,9 +48,9 @@ namespace tahoma::data {
         /**
          * Convert a buffer of Examples to a Batch
         */
-        int32_t batch_size = examples.size();
+        i64 batch_size = examples.size();
         assert(batch_size > 0);
-        int32_t num_fields = examples[0].field_ids.size();
+        size_t num_fields = examples[0].field_ids.size();
 
         vector<int32_t> max_lens(num_fields, 0);
         for (const auto& ex : examples) {
@@ -83,7 +83,7 @@ namespace tahoma::data {
     }
 
     auto Batch::to(torch::Device& device) -> Batch& {
-        for (auto idx = 0; idx < fields.size(); ++idx) {
+        for (size_t idx = 0; idx < fields.size(); ++idx) {
             fields[idx] = fields[idx].to(device);
         }
         return *this;
@@ -106,7 +106,7 @@ namespace tahoma::data {
 
     auto DataLoader::make_example(size_t id, std::vector<std::string> fields,
         vector<i32> eos_ids, std::vector<size_t> max_lengths, bool max_length_crop) -> Example {
-        i32 num_fields = fields.size();
+        size_t num_fields = fields.size();
         auto field_ids = vector2d<int32_t>(num_fields);
         for (size_t i = 0; i < num_fields; ++i) {
             auto ids = vocabs[i]->EncodeAsIds(fields[i]);
@@ -123,7 +123,7 @@ namespace tahoma::data {
 
     auto DataLoader::read_examples(Generator<IdRawExample> rows,
         std::vector<size_t> max_lengths, bool max_length_crop, bool add_eos) -> Generator<Example> {
-        i32 num_fields = -1;
+        size_t num_fields = 0;
         vector<i32> eos_ids = {};
         if (add_eos) {
             // iterate through vocabs and get eos_id for each vocab
@@ -132,7 +132,7 @@ namespace tahoma::data {
             }
         }
         for (auto [row_id, fields] : rows) {
-            if (num_fields < 0) {
+            if (num_fields == 0) {
                 num_fields = fields.size(); // initialize on first run
                 if (num_fields == 0 || num_fields > vocabs.size()) {
                     throw std::runtime_error(fmt::format("Number of fields must be > 0 and should not exceed the number of vocabs. num_fields: {}, vocabs: {}", num_fields, vocabs.size()));
@@ -170,7 +170,7 @@ namespace tahoma::data {
                 eos_ids.push_back(vocab->eos_id());
             }
         }
-        i32 num_fields = -1;
+        size_t num_fields = 0;
         size_t rec_num = 0;
         auto rows = read_lines(data_paths);
         for (auto fields : rows) {
@@ -451,7 +451,7 @@ namespace tahoma::data {
             while (true) {
                 std::unique_lock<std::mutex> lock(mutex);
                 cv.wait(lock, [&] { return stoken.stop_requested() || !maxi_batch_queue.empty() || status.reader_done; });
-                if (stoken.stop_requested() || status.reader_done && maxi_batch_queue.empty()) {
+                if (stoken.stop_requested() || (status.reader_done && maxi_batch_queue.empty())) {
                     break;
                 }
                 auto maxi_batch = maxi_batch_queue.front();
@@ -568,7 +568,7 @@ namespace tahoma::data {
             throw std::runtime_error("No data files specified");
         }
         spdlog::debug("Loading data from {}", fmt::join(data_paths, ", "));
-        const i32 num_fields = data_paths.size();
+        const size_t num_fields = data_paths.size();
         // check that atmost a single "-" is in data_paths
         if (std::count(data_paths.begin(), data_paths.end(), "-") > 1) {
             throw std::runtime_error("At most one '-' (i.e. STDIN) is allowed in data_paths");

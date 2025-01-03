@@ -51,8 +51,8 @@ namespace tahoma::train {
 
     class KLDivergenceImpl : public CriterionImpl {
     protected:
-        f32 _label_smooth_rate;
         i64 _num_labels;
+        f32 _label_smooth_rate;
         i64 _num_exclusions;
         F::KLDivFuncOptions _options;
 
@@ -74,8 +74,8 @@ namespace tahoma::train {
 
     class LRScheduler {
     protected:
-        i64 _current_step;
         optim::Optimizer& _optimizer;
+        i64 _current_step;
         f32 _last_rate;
 
     public:

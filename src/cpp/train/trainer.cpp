@@ -44,21 +44,23 @@ namespace tahoma::train {
         : _work_dir{ work_dir },
         _config{ conf },
         _device{ DEVICE },
+        _fp16_enabled{ _config["trainer"]["fp16"].as<bool>(false) },
+
+        _data_loader{ tahoma::data::DataLoader(_config) },
+        _pad_id{ _data_loader.output_vocab()->pad_id() },
+        _bos_id{ _data_loader.output_vocab()->bos_id() },
+
         _model{ utils::init_model(_config, _device) },
         _task_type{ _model->task_type() },
         _projector{ _model->lm_head },
         _optimizer{ utils::init_optimizer(_config, _model) },
         _scheduler{ utils::init_scheduler(_config, *_optimizer) },
 
-        _data_loader{ tahoma::data::DataLoader(_config) },
-        _fp16_enabled{ _config["trainer"]["fp16"].as<bool>(false) },
-        _pad_id{ _data_loader.output_vocab()->pad_id() },
-        _bos_id{ _data_loader.output_vocab()->bos_id() },
         _loss_computer{ utils::init_loss_computer(_config, _projector, _pad_id) },
         _sample_batch{ _data_loader.get_samples(_config["validator"]["data"].as<std::vector<std::string>>(), /*n_samples*/5) },
         _stopper{ _config["trainer"]["early_stopping"].as<int>(8) } {
-        spdlog::info("Trainer initialized; work_dir={}, cuda_available?={} device={}; fp16={}",
-            work_dir, torch::cuda::is_available(), _device == torch::kCUDA ? "cuda" : "cpu", _fp16_enabled);
+        spdlog::info("Trainer initialized; \n\twork_dir={},\n\ttask={},\n\tdevice={},\n\tfp16={}\n\tmodel={}",
+            work_dir, task_type_string(_task_type), _device.str(), _fp16_enabled, _model->name());
         spdlog::info("Early stopping enabled? {}, patience: {}", _stopper.patience > 0 ? "Yes" : "No", _stopper.patience);
         // check if pad_id is correct
         if (_pad_id < 0) {
@@ -145,7 +147,7 @@ namespace tahoma::train {
             pack = step_nmt(batch, stats, mode);
             break;
         default:
-            throw std::runtime_error("Unknown task type");
+            throw std::runtime_error("Unknown or unsupported task type " + task_type_string(_task_type));
         }
         //////// DEBUGGING BEGIN ////////
         auto log_batch = [&]() {
@@ -153,7 +155,7 @@ namespace tahoma::train {
             for (auto i = 0; i < batch.examples.size(); i++) {
                 auto ex = batch.examples[i];
                 for (size_t j = 0; j < ex.fields.size(); ++j) {
-                    std::cerr << "Field " << j << ": " << ex.fields[j] << std::endl;
+                    std::cerr << fmt::format("[#{}##{}] : {}\n", i, j, ex.fields[j]);
                 }
             }
             for (const auto& [key, value] : pack) {
@@ -193,6 +195,14 @@ namespace tahoma::train {
     }
 
 
+    auto infinite_looper(std::vector<data::Batch> batches) -> Generator<data::Batch> {
+        while (true) {
+            for (auto& batch : batches) {
+                co_yield batch;
+            }
+        }
+    }
+
     void Trainer::train() {
         spdlog::info("Moving to device {}", _device == torch::kCUDA ? "cuda" : "cpu");
         _model->to(_device);
@@ -209,12 +219,32 @@ namespace tahoma::train {
         size_t n_skips = 0;
         size_t MAX_BAD_SKIPS = 5;
         size_t n_data_threads = _config["trainer"]["data_threads"].as<size_t>(1);
+
+        bool is_smoke_test = _config["trainer"]["smoke_test"].as<bool>(false);
+        if (is_smoke_test) {
+            // overfit on a small dataset for debugging models
+            // models should be able to overfit to a small dataset if you train long enough
+            spdlog::warn("Smoke test mode enabled. We will overfit to validation set. Use a small validation set for this.");
+        }
+
         for (i32 epoch = 0; epoch < num_epochs; epoch++) {
-            for (auto batch : _data_loader.get_train_data(n_data_threads)) {
+            spdlog::info("Epoch {}", epoch);
+            Generator<data::Batch> batches;
+            if (is_smoke_test) {
+                vector<data::Batch> val_batches;
+                for (auto batch : _data_loader.get_validation_data()) {
+                    val_batches.push_back(batch);
+                }
+                batches = infinite_looper(std::move(val_batches));
+            } else {
+                batches = _data_loader.get_train_data(n_data_threads);
+            }
+            for (auto batch : batches) {
                 try {
                     step(batch, stats, Mode::TRAINING);
                     n_skips = 0;
                 } catch (const BadBatchException& e) {
+                    n_skips++;
                     spdlog::error("Bad batch detected. Skipping batch. Error: {}", e.what());
                     n_skips++;
                     if (n_skips > MAX_BAD_SKIPS) {
@@ -223,7 +253,7 @@ namespace tahoma::train {
                     }
                     continue;
                 }
-                batch.fields.clear(); // clear references to tensors
+                //batch.fields.clear(); // clear references to tensors
 
                 if (stats.step_num % validation_frequency == 0) {
                     bool is_early_stop = validate();
