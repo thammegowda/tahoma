@@ -21,21 +21,75 @@ import json
 import functools
 import hashlib
 from collections import defaultdict
+from dataclasses import dataclass
+from typing import Dict
 
 import torch
 import numpy as np
 import huggingface_hub as hf_hub
-import transformers
-from transformers.utils import WEIGHTS_NAME, WEIGHTS_INDEX_NAME, CONFIG_NAME
+
+
+WEIGHTS_NAME = "pytorch_model.bin"
+WEIGHTS_INDEX_NAME = "pytorch_model.bin.index.json"
+CONFIG_NAME = "config.json"
 
 log.basicConfig(level=log.INFO)
 
+
+@dataclass
+class Model:
+    id: str
+    weight: str = None
+    shards: str = None
+    vocab: str = None
+    config: str = None
+    parent: 'Entry' = None
+
+KNWON_MODELS = [
+    Model(id='Unbabel/XCOMET-XL', weight='checkpoints/model.ckpt', config='hparams.yaml',
+        parent=Model(id='facebook/xlm-roberta-xl', vocab='sentencepiece.bpe.model', config=CONFIG_NAME)),
+    Model(id='Unbabel/XCOMET-XXL', weight='checkpoints/model.ckpt', config='hparams.yaml',
+        parent=Model(id='facebook/xlm-roberta-xxl', vocab='sentencepiece.bpe.model', config=CONFIG_NAME)),
+    Model(id='google/metricx-24-hybrid-large-v2p6', weight=WEIGHTS_NAME, config=CONFIG_NAME,
+        parent=Model(id='google/mt5-base', vocab='spiece.model')),
+    Model(id='google/metricx-24-hybrid-xl-v2p6', shards=WEIGHTS_INDEX_NAME,  config=CONFIG_NAME,
+        parent=Model(id='google/mt5-base', vocab='spiece.model')),
+    Model(id='google/metricx-24-hybrid-xxl-v2p6', shards=WEIGHTS_INDEX_NAME,  config=CONFIG_NAME,
+        parent=Model(id='google/mt5-base', vocab='spiece.model')),    
+]
+
+ENTRIES = {}
+for e in KNWON_MODELS:
+    assert e.id not in ENTRIES, f'Entry {e.id} already exists.'
+    ENTRIES[e.id] = e
+
+
+def id2entry(model_id: str) -> Model:
+    if model_id not in ENTRIES:
+        return ValueError(f'Model {model_id} not supported. If this is a new model, please edit me (__file__) and add the mappings to the KNOWN_MODELS.')
+    return ENTRIES[model_id]
 
 class TaskType:
     TEXT_GENERATION = "text-generation"
 
 def json_to_yaml(json_str) -> str:
     return yaml.dump(json.loads(json_str))
+
+
+def hf_get(*args, **kwargs) -> Path:
+    file = hf_hub.hf_hub_download(*args, **kwargs)
+    return Path(file).absolute()
+
+def load_hf_config(*args, **kwargs) -> dict:
+    config_file = hf_get(*args, **kwargs)
+    config_fmt = config_file.suffix.lower()
+    config_txt = Path(config_file).read_text()
+    if config_fmt in ('.yml', '.yaml'):
+        return yaml.safe_load(config_txt)
+    elif config_fmt == '.json':
+        return json.loads(config_txt)
+    else:
+        raise NotImplementedError(f'Unsupported config format {config_fmt}')
 
 def runtime_versions() -> dict:
     tl_mods = {name.split('.')[0] for name, mod in sys.modules.items()}
@@ -55,6 +109,7 @@ def file_md5(file_path) -> str:
 
 #WARNING: This function is not working. It is just a draft.
 def hf_to_torchscript(model_id, out_file, task_type):
+    import transformers
     assert not out_file.exists(), f'File {out_file} already exists. Not overwriting.'
     assert task_type == TaskType.TEXT_GENERATION, f'Only {TaskType.TEXT_GENERATION} is supported.'
     pipe = transformers.pipeline(model=model_id, framework="pt")
@@ -93,13 +148,13 @@ We use lower level APIs to load the model weights without instantiating the nn.M
 
 load_torch_weights = functools.partial(torch.load, weights_only=True) 
 
-def load_torch_weights_sharded(model_id, map_location=None):
+def load_torch_weights_sharded(model_id, index_filename=WEIGHTS_INDEX_NAME, map_location=None):
     """
     HF's impl directly loads weights to nn.Module subclass. But we need state without binding to nn.Module.
     So we are rewriting the function here. See the link for original implementation:
     https://github.com/huggingface/transformers/blob/ca03842cdcf2823301171ab27aec4b6b1cafdbc1/src/transformers/modeling_utils.py#L408
     """
-    index_file = hf_hub.hf_hub_download(repo_id=model_id, filename=WEIGHTS_INDEX_NAME)
+    index_file = hf_hub.hf_hub_download(repo_id=model_id, filename=index_filename)
     index = json.loads(Path(index_file).read_text())
     state = {}
     # index is key to shard
@@ -118,73 +173,74 @@ def load_torch_weights_sharded(model_id, map_location=None):
             state[key] = shard_state[key]
     return state
 
-def load_torch_state(args) -> dict:
-    try: 
-        weights_file = hf_hub.hf_hub_download(repo_id=args.model, filename=args.name)
-        return load_torch_weights(weights_file)
-    except Exception as e:
-        log.warning(f'Failed to load weights from {args.name}.', e)
-
+def load_torch_state(model: Model) -> dict:
     try:
-        log.info(f'Attempting shard index {WEIGHTS_INDEX_NAME}')
-        return load_torch_weights_sharded(args.model)
+        if model.weight:
+            log.info(f"Loading {model.id} / {model.weight} ")
+            weights_file = hf_hub.hf_hub_download(repo_id=model.id, filename=model.weight)
+            return load_torch_weights(weights_file)
+        elif model.shards:
+            log.info(f"Loading {model.id} / {model.shards} and the shards")
+            return load_torch_weights_sharded(model.id, index_filename=model.shards)
+        else:
+            raise Exception(f'No weights file found for {model.id}')
     except Exception as e:
-        log.warning('Failed to load weights from sharded files.', e)
-
-    raise Exception(f'Failed to load model weights from {args.model}. Tried {WEIGHTS_NAME} and {WEIGHTS_INDEX_NAME}.')
-
+        if "Unauthorized" in str(e):
+            log.warning(f'Login maybe required for {model.id}. Try "huggingface-cli login"', e)
+            raise e
 
 def pth_to_npz(args):
-    log.info(f'Converting {args.model} to {args.output}')
-    state = {}
-    state = load_torch_state(args)
-    for k, v in state.items():
-        if isinstance(v, torch.Tensor):
-            state[k] = v.numpy()
+    model = args.model
+    log.info(f'Converting {model.id} to {args.output}')
+
     model_type = None
     npz_file: Path = args.output
     npz_file.resolve().parent.mkdir(parents=True, exist_ok=True)
-    config_file = None
-    model_id = "hf://" + args.model
-    try:
-        # note: unbabel uses hparams name
-        config_file = hf_hub.hf_hub_download(repo_id=args.model, filename=CONFIG_NAME)
-    except:
-        log.warning(f'Config file {CONFIG_NAME} not found in the model repository')
-    if config_file:
-        config_file = Path(config_file)
-        assert config_file.exists(), f'Config file {config_file} does not exist.'
-        assert 'config.yml' not in state, 'config.yml already exists in the state dict.'
-        config_obj = json.loads(config_file.read_text())
-        if model_id:
-            assert 'model_id' not in config_obj, 'model_id already exists in the config file.'
-            config_obj['model_id'] = model_id
-        if config_obj.get('architectures'):
-            model_type = config_obj['architectures'][0]
+    config_obj = {}
+    state = {}
+    state["model_id"] = "hf://" + model.id
+    if model.config:
+        try:
+            config_obj = load_hf_config(repo_id=model.id, filename=model.config)
+            config_obj['model_id'] = model.id
+            if config_obj.get('architectures'):
+                model_type = config_obj['architectures'][0]
+            else:
+                model_type = model.id 
+            if model.parent and model.parent.config:
+                config_obj['parent'] = load_hf_config(repo_id=model.parent.id, filename=model.parent.config) 
 
-        config_obj = dict(
-            model=dict(
-                name=model_type,
-                args=config_obj
+            config_obj = dict(
+                model=dict(
+                    name=model_type,
+                    args=config_obj
+                )
             )
-        )
-        config_obj['original_toolkit'] = 'huggingface-transformers'
-        config_yml = yaml.dump(config_obj)
-        state['config.yml'] = str_as_array(config_yml)
-        Path(npz_file.with_name('config.yml')).write_text(config_yml)
-
-    assert 'meta.yml' not in state, 'meta.json already exists in the state dict.'
-    meta = {}
-    meta['converted_at'] = str(datetime.datetime.now())
-    meta['conversion_runtime'] = runtime_versions()
-    meta['model_id'] = model_id
-    state['meta.yml'] = str_as_array(yaml.dump(meta))
+            config_obj['original_toolkit'] = 'huggingface-transformers'
+            config_yml = yaml.dump(config_obj)
+            state['config.yml'] = str_as_array(config_yml)
+            config_out = npz_file.with_name('config.yml')
+            log.info(f"Config file saved at {config_out}")
+            config_out.write_text(config_yml)
+        except Exception as e:
+            log.warning(f'Config file {model.config} could not be loaded or parsed from {model.id}', e)
+    
+    weights = load_torch_state(model)
+    assert weights
+    for k, v in weights.items():
+        if isinstance(v, torch.Tensor):
+            weights[k] = v.numpy()
+    
+    state.update(weights)
     log.info(f'Saving {npz_file}')
     np.savez(npz_file, **state)
 
 
 def main():
     args = parse_args()
+    model = args.model
+
+    
     if args.format == 'npz':
         if not args.output.name.endswith('.npz'):
             # assume it is a directory
@@ -202,27 +258,32 @@ def main():
                 f'Output file should be .pth extension. Avoid {ext}. Or just use directory and let me create the file inside it.'
             args.output = args.output / "model.pth"
             log.info(f'Output file is {args.output}')
-        hf_to_torchscript(args.model, args.output, args.type)
+        hf_to_torchscript(model.id, args.output, TaskType.TEXT_GENERATION)
     else:
         raise NotImplementedError(f'Unsupported format {args.format}')
 
-    vocab_file_names = ['spiece.model', 'sentencepiece.bpe.model']
-    for name in vocab_file_names:
+    vocab = model
+    if not vocab.vocab and model.parent and model.parent.vocab:
+        vocab = model.parent  # get vocab from parent
+    if vocab.vocab:
         try:
-            src_vocab = hf_hub.hf_hub_download(repo_id=args.model, filename=name)
-            dest_vocab = Path(args.output).with_name(name)
+            src_vocab = hf_hub.hf_hub_download(repo_id=vocab.id, filename=vocab.vocab)
+            dest_vocab = Path(args.output).with_name(vocab.vocab)
             log.info(f'Copying {src_vocab} to {dest_vocab}')
             dest_vocab.write_bytes(Path(src_vocab).resolve().read_bytes())
-            break
-        except:
-            log.warning(f'File {name} not found in the model repository.')
+        except Exception as e:
+            log.warning(f'File {vocab.id} / {vocab.vocab} not found in the model repository.\n{e}')
+
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Converts an huggingface model to .npz compatible format.')
-    parser.add_argument('-m', '--model', type=str, help='Hgginface model ID or local path to model Id', required=True)
-    parser.add_argument('-n', '--name', type=str, help='File inside the HF model repository', default=WEIGHTS_NAME)
-    parser.add_argument('-t', '--type', default="text-generation",
-                        help='Pipeline type. Used to make example input for tracing torchscript from the pipeline.')
+    ids = "\n".join(ENTRIES.keys())
+    epilog = f'Known models:\n{ids}'
+    parser = argparse.ArgumentParser(
+        description='Converts an huggingface model to .npz compatible format.',
+        formatter_class=argparse.RawDescriptionHelpFormatter, epilog=epilog)
+    parser.add_argument('-m', '--model', metavar="HF_ID", type = id2entry,  required=True,
+                        help='Hgginface model ID or local path to model Id. See known models below for the list of ids',
+                       )
     parser.add_argument('-o', '--output', type=Path, help='Output file path', required=True)
     parser.add_argument('-f', '--format', choices=['npz', 'torchscript'], default='npz', help='Output format')
     return parser.parse_args()

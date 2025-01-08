@@ -18,6 +18,8 @@ from typing import List
 
 log.basicConfig(level=log.INFO)
 
+PROJECT_NAME = 'tahoma'
+
 
 def get_dependencies(bin_path:Path) -> List[str]:
     assert bin_path.exists()
@@ -35,7 +37,7 @@ def main():
     # we pick the executable from the build directory to discover deps
     #   but we patchelf the executable in the install directory
     # this is because when cmake installs the executable, it loses the rpath
-    executable = build_dir / 'tahoma'
+    executable = build_dir / PROJECT_NAME
     install_dir = args.install
     install_libs_dir = install_dir / 'lib'
     assert executable.exists(), f'{executable} does not exist'
@@ -54,7 +56,7 @@ def main():
     else:
         log.warning('patchelf not found. Please install it to fix the rpath. or use LD_LIBRARY_PATH at runtime')
     if args.archive:
-        basename = f'tahoma-{args.version}'
+        basename = f'{PROJECT_NAME}-{args.version}'
         archive_file: Path = install_dir.parent / f'{basename}.tgz'
         # TODO: make the top level dir in the archive to be tahoma-<version>
         cmd = f'cd {install_dir} && tar -czvf {archive_file} *'
