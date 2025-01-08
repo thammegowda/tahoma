@@ -51,6 +51,7 @@ namespace tahoma {
     using namespace torch::indexing;
     using Tensor = torch::Tensor;
     using Slice = torch::indexing::Slice;
+    using Device = torch::Device;
 
     //using Pack = std::map<std::string, std::any>;
 
