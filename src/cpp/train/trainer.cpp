@@ -29,6 +29,7 @@ namespace tahoma::train {
     auto Stopper::is_stop(float loss) -> StopperStatus {
         using enum StopperStatus;
         if (loss < best_loss) {
+            spdlog::info("New best loss: {:.5f}; previous best: {:.5f}; improvement: {:.6f}", loss, best_loss, best_loss - loss);
             best_loss = loss;
             num_stalls = 0;
             spdlog::info("New best loss: {:.5f}", loss);
@@ -58,7 +59,7 @@ namespace tahoma::train {
 
         _loss_computer{ utils::init_loss_computer(_config, _projector, _pad_id) },
         _sample_batch{ _data_loader.get_samples(_config["validator"]["data"].as<std::vector<std::string>>(), /*n_samples*/5) },
-        _stopper{ _config["trainer"]["early_stopping"].as<int>(8) } {
+        _stopper{ _config["trainer"]["early_stop_patience"].as<int>(24) } {
         spdlog::info("Trainer initialized; \n\twork_dir={},\n\ttask={},\n\tdevice={},\n\tfp16={}\n\tmodel={}",
             work_dir, task_type_string(_task_type), _device.str(), _fp16_enabled, _model->name());
         spdlog::info("Early stopping enabled? {}, patience: {}", _stopper.patience > 0 ? "Yes" : "No", _stopper.patience);

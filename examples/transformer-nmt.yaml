@@ -20,11 +20,12 @@ optimizer:
     weight_decay: 0.0005
 
 scheduler:
-  name: noam
+  name: inverse_sqrt
   args:
-    warmup_steps: 8000
-    model_dim: 512
-    constant: 2
+    warmup_steps: 4000
+    init_lr: 0.0001
+    peak_lr: 0.005
+    constant: 1
 
 schema:
   fields:
@@ -46,13 +47,14 @@ trainer:
     - 128
     - 128
   max_length_crop: true
-  fp16: true
+  #fp16: true
+  #smoke_test: true
   chunk_size: 8
   data_threads: 8
   log_frequency: 50u
   #log_frequency: 1u
-  smoke_test: true
   log_first: 5
+  early_stop_patience: 16
 
   criterion:
     name: kl_divergence
@@ -63,8 +65,8 @@ trainer:
 validator:
   frequency: 500
   data:
-    - data/eng-deu/dev.100.deu
-    - data/eng-deu/dev.100.eng
+    - data/eng-deu/dev.deu
+    - data/eng-deu/dev.eng
   batch_size: 8
   criteria:
     - name: cross_entropy
