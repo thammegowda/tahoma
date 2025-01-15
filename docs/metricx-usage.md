@@ -33,7 +33,7 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 batch_size=64   # for large
 if [[ $MODEL =~ -xl ]]; then batch_size=16;
 elif [[ $MODEL =~ -xxl ]]; then batch_size=8;
-
+fi
 m="$MODELS_CACHE/$MODEL/model.npz"
 v="$MODELS_CACHE/$MODEL/spiece.model"
 max_length=1024
