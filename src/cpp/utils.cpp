@@ -40,6 +40,8 @@ namespace tahoma::utils {
         // NOTE: trying to move model to device here causes error. Not sure why.
         //LOG::info("Device: {}", device == torch::kCPU ? "CPU" : "CUDA");
         //model->to(device);
+        spdlog::info("Model initialized name={}; task={}; device={}", model_name,
+            task_type_string(model->task_type()), device.str());
         return model;
     }
 

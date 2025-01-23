@@ -6,7 +6,7 @@
 #include "test_data_loader.cpp"
 #include "test_serialize.cpp"
 #include "test_trainer.cpp"
-
+#include "test_parallel_init.cpp"
 
 using namespace tahoma::tests;
 
@@ -68,6 +68,7 @@ int main(int argc, char const* argv[]) {
         {test_samples, "samples", 1, "Load samples from a config file", "Args: <config_file>"},
         {test_npz_load, "npz_load", 1, "Load model from checkpt file", "Args: <checkpt.npz>"},
         {test_trainer_nmt, "trainer_nmt", 2, "Train a model", "Args: <config_file> <work_dir>"},
+        {test_parallel_init, "parallel_init", 1, "Test model initialization time", "Args: <config_file>"},
     };
     std::map<std::string, TestCase> index = {};
     for (const auto& test : tests) {

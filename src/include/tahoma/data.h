@@ -72,8 +72,8 @@ namespace tahoma::data {
     };
 
     struct DataLoader {
-        std::vector<std::shared_ptr<sentencepiece::SentencePieceProcessor>> vocabs;
         config::Config config;
+        std::vector<std::shared_ptr<sentencepiece::SentencePieceProcessor>> vocabs;
 
         DataLoader(config::Config config, std::vector<std::shared_ptr<sentencepiece::SentencePieceProcessor>> vocabs) :
             config(config), vocabs(vocabs) {

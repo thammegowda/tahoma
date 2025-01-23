@@ -24,24 +24,30 @@ namespace tahoma::train {
         auto is_stop(float loss) -> StopperStatus;
     };
 
-    
+
+    // note: order of initialization in constructor should follow the order of declaration
+    // e.g. task_type depends on model, so model should be declared AND initialized before task_type
+    // otherwise, task_type will be initialized with garbage value (learned the hard way)
+    //  Some readings here: https://stackoverflow.com/a/24287946/1506477
+
     class Trainer {
     protected:
         fs::path _work_dir;
         config::Config _config;
+        bool _fp16_enabled;
+
+        torch::Device _device = DEVICE;
+        tahoma::data::DataLoader _data_loader;
+        int64_t _pad_id = 0;
+        int64_t _bos_id = 1;
+
         std::shared_ptr<model::LanguageModel> _model;
         TaskType _task_type;
-        //nn::AnyModule _model;
         nn::AnyModule _projector;
         std::shared_ptr<optim::Optimizer> _optimizer;
         std::shared_ptr<LRScheduler> _scheduler;
-        tahoma::data::DataLoader _data_loader;
 
-        bool _fp16_enabled;
-        int64_t _pad_id = 0;
-        int64_t _bos_id = 1;
         std::shared_ptr<LossComputer> _loss_computer;
-        torch::Device _device;
         data::Batch _sample_batch;
         Stopper _stopper;
 

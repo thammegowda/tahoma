@@ -9,15 +9,15 @@ using namespace tahoma;
 namespace tahoma::layer::transformer {
 
     struct AbsolutePositionEmbeddingImpl : nn::Module {
+        int model_dim;
+        nn::Dropout dropout;
         nn::Embedding embedding;
         torch::Tensor positions;
-        nn::Dropout dropout;
-        int model_dim;
 
         AbsolutePositionEmbeddingImpl(int vocab_size, int model_dim, double dropout = 0.1, const int max_len = 5000) :
             model_dim{ model_dim },
-            embedding{ register_module("embedding", nn::Embedding(nn::EmbeddingOptions(vocab_size, model_dim))) },
             dropout{ register_module("dropout", nn::Dropout(nn::DropoutOptions(dropout))) },
+            embedding{ register_module("embedding", nn::Embedding(nn::EmbeddingOptions(vocab_size, model_dim))) },
             positions{ torch::zeros({1, max_len, model_dim}, torch::requires_grad(false)) }
         {
             auto pos = torch::arange(max_len, torch::kLong);
@@ -28,8 +28,7 @@ namespace tahoma::layer::transformer {
         }
 
         auto forward(torch::Tensor x) -> torch::Tensor {
-            x = embedding(x) * std::sqrt(model_dim);
-            x = x + positions.index({ Slice(), Slice(None, x.size(1)) });
+            x = embedding(x) * std::sqrt(model_dim) + positions.index({ Slice(), Slice(None, x.size(1)) });
             return dropout(x);
         }
     };
@@ -73,7 +72,7 @@ namespace tahoma::layer::transformer {
             nhead{ nhead }
         {}
 
-        auto forward(torch::Tensor query, torch::Tensor key, torch::Tensor value, torch::Tensor key_padding_mask)
+        auto forward(torch::Tensor query, torch::Tensor key, torch::Tensor value, torch::Tensor key_mask)
             -> std::pair<torch::Tensor, torch::Tensor>;
     };
     TORCH_MODULE(MultiheadAttention);
@@ -102,9 +101,9 @@ namespace tahoma::layer::transformer {
     TORCH_MODULE(TransformerEncoderLayer);
 
     struct TransformerEncoderImpl : public nn::Module {
+        int num_layers;
         AbsolutePositionEmbedding position_embedding;
         nn::LayerNorm norm;
-        int num_layers;
         nn::ModuleList layers;
 
         TransformerEncoderImpl(int vocab_size, int model_dim, int ffn_dim, int nhead, int num_layers, double dropout = 0.1) :
@@ -161,9 +160,10 @@ namespace tahoma::layer::transformer {
         nn::LayerNorm norm;
         nn::ModuleList layers;
 
-        TransformerDecoderImpl(int vocab_size, int model_dim, int ffn_dim, int nhead, int num_layers, double dropout = 0.1) :
-            model_dim{ (assert(model_dim > 0), model_dim) },
+        TransformerDecoderImpl(int vocab_size, int model_dim, int ffn_dim, int nhead,
+                int num_layers, double dropout = 0.1) :
             num_layers{ (assert(num_layers > 0), num_layers) },
+            model_dim{ (assert(model_dim > 0), model_dim) },
             nhead{ (assert(nhead > 0), assert(model_dim % nhead == 0), nhead) },
             position_embedding{ (assert(vocab_size > 0), assert(model_dim > 0),
                 register_module("position_embedding", AbsolutePositionEmbedding(vocab_size, model_dim, dropout))) },

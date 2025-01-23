@@ -30,5 +30,7 @@ At the time of writing, C++23 seems to be the latest, stable-enough version. C++
    * `p tensor.print()` to print the tensor type and shape.
    * ``ptensor tensor`` to print the tensor values, where ptensor is a user-defined command in `.gdbinit` file at the root of the project. gdb might not load the `.gdbinit` file by default due to security reasons. Look for warnings when you start gdb. One fix is to add the following line to your gdbinit file: `add-auto-load-safe-path /`. 
 
-*
-
+* Initialization order matters! Order of declaration of class/struct members and Initialization list should match.
+   If you mismatch, the compiler will try to reorder the initialization list for you, which usually fine. 
+   But in rare scenarios, where a member depends on another, and the order is mismatch, this could lead to bugs. 
+   So, just keep the order in mind when delcaring and initializing attributes. 

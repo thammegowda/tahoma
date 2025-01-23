@@ -49,5 +49,26 @@ namespace tahoma::utils {
     auto debug_message(bool condition, const std::string& message, Pack& data, std::initializer_list<string> keys) -> void;
 
 
+    struct Timer {
+
+        std::string name;
+        std::chrono::time_point<std::chrono::high_resolution_clock> start;
+
+        Timer(std::string name="")
+        : name {name}, start {std::chrono::high_resolution_clock::now()}{
+            spdlog::info("Timer {} started", name);
+        }
+
+        float elapsed() {
+            auto now = std::chrono::high_resolution_clock::now();
+            return std::chrono::duration_cast<std::chrono::microseconds>(now - start).count() / 1e6;
+        }
+
+        ~Timer() {
+            spdlog::info("Timer {} ended: {:.3f}s", name, elapsed());
+        }
+    };
+
+
 } // namespace tahoma::train
 

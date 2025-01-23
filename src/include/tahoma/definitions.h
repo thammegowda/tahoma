@@ -51,6 +51,7 @@ namespace tahoma {
     using namespace torch::indexing;
     using Tensor = torch::Tensor;
     using Slice = torch::indexing::Slice;
+    using Device = torch::Device;
 
     //using Pack = std::map<std::string, std::any>;
 
@@ -72,9 +73,12 @@ namespace tahoma {
                 return fallback;
             }
         }
-        auto as_tensor(const std::string& key) -> Tensor {
-            return std::any_cast<Tensor>(this->at(key));
+
+        template <typename T=Tensor>
+        auto get(const std::string& key) -> T {
+            return std::any_cast<T>(this->at(key));
         }
+
     };
 
     using TensorPack = std::map<std::string, torch::Tensor>;
@@ -94,8 +98,9 @@ namespace tahoma {
 
     inline int global_setup() {
 
+        std::locale::global(std::locale(std::getenv("LC_ALL") ? std::getenv("LC_ALL") : "en_US.UTF-8"));
         spdlog::set_default_logger(spdlog::stderr_color_mt("console"));
-        spdlog::set_pattern("[%Y%m%d %H:%M:%S.%e] [t%t] [%^%l%$] %v");
+        spdlog::set_pattern("[%C%m%d %H:%M:%S|t%t][%^%l%$] %v");
         spdlog::set_level(spdlog::level::info);
         spdlog::debug("Global setup started");
         backward::SignalHandling sh;
@@ -113,5 +118,20 @@ namespace tahoma {
         NMT,
         REGRESSION,
     };
+    
+    // agggh! hack to get enums cant have to_string method
+    inline auto task_type_string(TaskType taskType) -> std::string {
+        
+        switch (taskType) {
+            case TaskType::LM:
+                return "LM";
+            case TaskType::NMT:
+                return "NMT";
+            case TaskType::REGRESSION:
+                return "REGRESSION";
+            default:
+                return "UNKNOWN";
+        }
+    }
 
 } // namespace tahoma

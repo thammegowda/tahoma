@@ -19,14 +19,13 @@ set (BACKWARD_HAS_DW on)   # sudo apt install libdw-dev
 option(USE_CCACHE "Use ccache compiler cache (https://ccache.dev)" ON)
 option(USE_CUDA "Use CUDA libtorch. Default is CPU only libtorch" OFF)
 option(USE_ROCM "Use ROCM libtorch. Default is CPU only libtorch" OFF)
-option(USE_PYTORCH "Use libtorch from the available pytorch installation
-(i.e., torch.utils.cmake_prefix_path). This can be CPU/CUDA/ROCM build." OFF)
-if (USE_CUDA AND USE_ROCM)
-    message(FATAL_ERROR "USE_CUDA and USE_ROCM cannot be set at the same time")
-endif()
+option(USE_PYTORCH "Use libtorch from the available pytorch installation 
+    (i.e., torch.utils.cmake_prefix_path). This can be CPU/CUDA/ROCM build." OFF)
 option(COMPILE_TESTS "Compile tests under the ./tests directory" OFF)
 option(USE_STATIC_LIBS "Use static libraries" OFF)
 
+
+#TODO: get this from a file
 set(TAHOMA_VERSION "0.0.1" CACHE STRING "Tahoma version")
 
 
@@ -34,15 +33,18 @@ set(PYTHON_EXECUTABLE python CACHE FILEPATH "Python executable name path. Used t
 find_package(Git QUIET)
 
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release)
+    set(CMAKE_BUILD_TYPE ReleaseDebug)  # retain debug info, but optimize for performance
 endif()
 
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -ggdb3 -O0")
+if(CMAKE_BUILD_TYPE MATCHES ReleaseDebug)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -ggdb3 -O3")
+    message(STATUS "CMAKE_BUILD_TYPE=ReleaseDebug. Flags are set to retain the most debug info and optimized for performance")
+elseif(CMAKE_BUILD_TYPE MATCHES Debug)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -ggdb3 -O0")  # -Wall
     message(STATUS "CMAKE_BUILD_TYPE=Debug. Flags are set to retain the most debug info and disabled all optimizations")
 elseif(CMAKE_BUILD_TYPE MATCHES Release)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
-    message(STATUS "CMAKE_BUILD_TYPE=Release. Flags set to optimize for performance")
+    message(STATUS "CMAKE_BUILD_TYPE=Release. Flags set to optimize for performance and disabled all debug info")
 else()
     message(FATAL_ERROR "Unknown build type: ${CMAKE_BUILD_TYPE}")
 endif()
@@ -59,43 +61,54 @@ execute_process(
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
-execute_process(
-    COMMAND bash  ${CMAKE_SOURCE_DIR}/libs/setup.sh
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
 
 # # only one of USE_CUDA, USE_ROCM, USE_PYTORCH can be set
-if ((USE_CUDA AND USE_ROCM) OR
+if (
+    (USE_CUDA AND USE_ROCM) OR
     (USE_CUDA AND USE_PYTORCH) OR
-    (USE_ROCM AND USE_PYTORCH))
+    (USE_ROCM AND USE_PYTORCH)
+)
     message(FATAL_ERROR "Only one of USE_CUDA, USE_ROCM, USE_PYTORCH can be set")
 endif()
 
-if (USE_CUDA)
-    set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cu124" CACHE PATH "libTorch CUDA path")
-    if(NOT CUDA_TOOLKIT_ROOT_DIR)
-        set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda" CACHE PATH "CUDA root path")
-    endif()
-    set(CMAKE_CUDA_COMPILER ${CUDA_TOOLKIT_ROOT_DIR}/bin/nvcc)
-elseif (USE_ROCM)
-    set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-rocm" CACHE PATH "libTorch ROCM path")
-elseif (USE_PYTORCH)  # libtorch from pytorch installation
+# FIXME: not working
+option(COMPILE_TORCH "compile torch" off)
+if (COMPILE_TORCH)
+    # -DBUILD_SHARED_LIBS=OFF -DUSE_CUDA=off -DBUILD_PYTHON=off -DCMAKE_BUILD_TYPE=Debug
+    #TODO: execute process to clone and compile libtorch 
+    #set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/pytorch/build-tg-cpu-litepb/install" CACHE PATH "libTorch path")
+    set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/pytorch/build_mobile/install" CACHE PATH "libTorch path")
+else()
+    message(STATUS "Using precompiled libtorch instead of recompiling source")
     execute_process(
-        COMMAND "${PYTHON_EXECUTABLE}" -c "import torch; print(torch.utils.cmake_prefix_path)"
-        OUTPUT_VARIABLE LIBTORCH_PATH
-        OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ECHO STDOUT)
-else()  # CPU only build by default
-    set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cpu" CACHE PATH "libTorch CPU path")
-endif()
-
+        COMMAND bash  ${CMAKE_SOURCE_DIR}/libs/setup.sh
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+    if (USE_CUDA)
+        set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cu124" CACHE PATH "libTorch CUDA path")
+        if(NOT CUDA_TOOLKIT_ROOT_DIR)
+            set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda" CACHE PATH "CUDA root path")
+        endif()
+        set(CMAKE_CUDA_COMPILER ${CUDA_TOOLKIT_ROOT_DIR}/bin/nvcc)
+    elseif (USE_ROCM)
+        set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-rocm" CACHE PATH "libTorch ROCM path")
+    elseif (USE_PYTORCH)  # libtorch from pytorch installation
+        execute_process(
+            COMMAND "${PYTHON_EXECUTABLE}" -c "import torch; print(torch.utils.cmake_prefix_path)"
+            OUTPUT_VARIABLE LIBTORCH_PATH
+            OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ECHO STDOUT)
+    else()  # CPU only build by default
+        set(LIBTORCH_PATH "${CMAKE_SOURCE_DIR}/libs/libtorch-cpu" CACHE PATH "libTorch CPU path")
+    endif()
+    #message(STATUS "  >>>EXT_LIBS: ${EXT_LIBS}")
+endif(COMPILE_TORCH)
+    
 message(STATUS "LIBTORCH_PATH: ${LIBTORCH_PATH}")
 list(APPEND CMAKE_PREFIX_PATH "${LIBTORCH_PATH}" CACHE PATH "libTorch path")
-
-# add_subdirectory(${CMAKE_SOURCE_DIR}/libs/pytorch)
 find_package(Torch REQUIRED)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 list(APPEND EXT_LIBS ${TORCH_LIBRARIES})
-#message(STATUS "  >>>EXT_LIBS: ${EXT_LIBS}")
+
 
 if(USE_CCACHE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -C")
@@ -104,8 +117,9 @@ endif()
 
 set(_LIBS_DIR "${CMAKE_SOURCE_DIR}/libs")
 include_directories(
-    "${LIBTORCH_PATH}/include"
-    "${LIBTORCH_PATH}/include/torch/csrc/api/include"
+    ${TORCH_INCLUDE_DIRS}
+    #"${LIBTORCH_PATH}/include"
+    #"${LIBTORCH_PATH}/include/torch/csrc/api/include"
     "${_LIBS_DIR}/sentencepiece/src"
     "${_LIBS_DIR}/spdlog/include"
     "${_LIBS_DIR}/yaml-cpp/include"

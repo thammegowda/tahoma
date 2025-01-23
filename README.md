@@ -109,10 +109,15 @@ bash scripts/build_mobile.sh
 bash scripts/build_local.sh
 
 # option 3: direct and the pro-mode 
+
+## install deps
+
+pip install pyyaml typing  typing-extensions
+
 OUT=build-tg-cpu; cmake -B$OUT -DBUILD_SHARED_LIBS=OFF -DUSE_CUDA=off -DBUILD_PYTHON=off -DBUILD_TEST=OFF -DBUILD_BINARY=OFF -DBUILD_CUSTOM_PROTOBUF=OFF -DCMAKE_INSTALL_PREFIX=$OUT/install
 OUT=build; 
 cmake -B$OUT -DBUILD_SHARED_LIBS=OFF -DUSE_CUDA=off -DBUILD_PYTHON=off -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$OUT/install
-cmke --build $OUT --target install -j
+cmake --build $OUT --target install -j
 # $OUT/install has libtorch; 
 
 ```
