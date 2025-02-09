@@ -65,8 +65,9 @@ cp tmp/$TOKENIZER/spiece.model tmp/$MODEL/
 ```
 torch2npz.py requires python environment with huggingface transformers. 
 Alternatively, if you have access, you may obtain converted models from blob storage @ `https://tgwus2.blob.core.windows.net/data/cache/tahoma/models/`
+(see `tests/setup.sh` for example download used for regression tests)
 
-Step 2. Run 
+Step 2. Run
 ```bash
 CUDA_VISIBLE_DEVICES=0
 MODEL=metricx-24-hybrid-large-v2p6
@@ -77,17 +78,36 @@ echo -e "source\tcandidate" | build/tahoma predict -m tmp/$MODEL/model.npz -v tm
 
 ## Run Tests
 
-Tests are powered by Cmake and CTest. To enable set `-DCOMPILE_TESTS=on`
+Tests are powered by Cmake and CTest. To enable set `-DCOMPILE_TESTS=on`.
 
 ```bash
 cmake -B build -DCOMPILE_TESTS=on -DUSE_CUDA=on
 cmake --build build -j
-
 # produces an executable at build/tests/tahoma-tests
 # you may directly run the executable e.g. for debugging via gdb
- but recommeneded way is ctest
+# but recommeneded way is ctest
+
+# download models for regression tests
+bash tests/setup.sh
+
+# Run all tests; -V is verbose
 ctest -V --test-dir build/tests
+
+# list all tests
+ctest --test-dir build/tests -N
+
+# run a specific test e.g. pytests or #8
+ctest -V --test-dir build/tests -R pytests
+ctest -V --test-dir build/tests -I 8
 ```
+
+Some regression tests are implemented using `pytest`, which can be installed by running `pip install pytest`.
+`CTest` is configured to automatically invoke `pytest`. However, if running `pytest` directly is required,
+set environment variable `CMAKE_BINARY_DIR=path/to/build` before invoking `pytest tests/` command.
+```bash
+CMAKE_BINARY_DIR=build/ pytest -vs test/
+```
+
 
 
 ## VS Code Setup
