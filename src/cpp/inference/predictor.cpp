@@ -6,8 +6,7 @@
 #include <tahoma/data.h>
 #include <tahoma/model/metricx.h>
 #include <tahoma/serialize.h>
-#include <c10/core/InferenceMode.h>
-#include <tahoma/autocast.h>  
+#include <tahoma/autocast.h>
 
 namespace tahoma::inference {
 
@@ -49,8 +48,8 @@ namespace tahoma::inference {
         OutputCollector(string out_path) : out_path(out_path) {}
         ~OutputCollector() {
             if (!cache.empty()) {
-                // @TG: this should not be happening. There was a bug in the code and I believe I have fixed it. 
-                //   we can remove this after some testing
+                // @TG: this should not be happening. There was a bug in the earlier version of code and I believe I have fixed it.
+                //   we should  remove this after some testing
                 spdlog::error("Cache is not empty; not all scores were sent to output. Remaining items in cache {}", cache.size());
                 spdlog::error("Awating: {}, Dumping cache to stderr", idx);
                 for (auto& [id, line] : cache) {
@@ -92,13 +91,11 @@ namespace tahoma::inference {
             models(devices.size()),
             use_fp16(options.get("fp16", false)) {
             auto start_time = std::chrono::system_clock::now();
-            auto inference_guard = torch::InferenceMode();
             std::vector<std::jthread> threads;
             for (auto idx = 0; idx < devices.size(); idx++) {
                 auto t = std::jthread([&, idx] {
                     auto device = devices[idx];
                     spdlog::info("[{} {}] WIP; Initializing model", idx, device.str());
-                    //auto device = torch::Device(dev_name);
                     auto device_guard = torch::DeviceGuard(device);
                     auto model = utils::init_model(config, device);
                     spdlog::info("[{} {}] DONE; Initialized model", idx, device.str());
@@ -126,7 +123,7 @@ namespace tahoma::inference {
             bool max_length_crop = true;
             auto collector = OutputCollector(output_file);
             auto mloader = data::MultiThreadedLoader(
-                data_loader, { input_file }, mini_batch, maxi_batch, 
+                data_loader, { input_file }, mini_batch, maxi_batch,
                 max_length_crop, { max_length }, { line_mapper });
             mloader.add_eos = false;
             mloader.sort_by = "length";
@@ -136,19 +133,18 @@ namespace tahoma::inference {
             std::vector<std::jthread> threads;
             for (size_t worker_id = 0; worker_id < devices.size(); ++worker_id) {
                 auto t = std::jthread([&, worker_id, pad_id] {
-                    //auto dev_name = this->devices[worker_id];
                     auto device = devices[worker_id];
                     spdlog::info("Starting predict task on {}", device.str());
-                    auto device_guard = torch::DeviceGuard(device);
                     auto autocast_guard = AutoCastGuard(device.type(), use_fp16 && torch::autocast::is_autocast_enabled(device.type()));
-                    if (autocast_guard.is_enabled() && worker_id == 0) { 
+                    if (autocast_guard.is_enabled() && worker_id == 0) {
                         spdlog::info("Enabled FP16");
                     }
+                    auto device_guard = torch::DeviceGuard(device);
                     auto inference_guard = torch::InferenceMode(); // has to be on each thread
                     auto& model = this->models[worker_id];
-                    // ^^ concretizing model to make sure the forward() call is directly on the model without glue layers
-                    // because I am not sure if the glue layers forward batches by ref or by value (i.e copy)
+                    model->eval();
                     auto& queue = mloader.mini_batch_queue;
+                    size_t count = 0;
                     while (true) {
                         std::unique_lock<std::mutex> lock(mloader.mutex);
                         mloader.cv.wait(lock, [&] {return !queue.empty() || mloader.status.is_done(); });
@@ -172,7 +168,7 @@ namespace tahoma::inference {
                             out = model->forward(inps_pack);
                         } catch(const c10::OutOfMemoryError& e) {
                             auto err_msg = fmt::format("OOM error on worker {}. input_size: {}; Inner exception what: {} ", worker_id, fmt::join(inps.sizes(), ", "), e.what());
-                            throw std::runtime_error(err_msg); 
+                            throw std::runtime_error(err_msg);
                         }
                         auto scores = std::any_cast<torch::Tensor>(out["result"]);
                         for (int i = 0; i < scores.size(0); ++i) {
@@ -180,9 +176,10 @@ namespace tahoma::inference {
                             //string line = fmt::format("{:.6f}\t{}\tlength: {}", scores[i].item<float>(), ex.id, ex.fields[0].size());
                             string line = fmt::format("{:.6f}", scores[i].item<float>());
                             collector.put(ex.id, line);
+                            count++;
                         }
                     }
-                    spdlog::info("Worker {} finished", worker_id);
+                    spdlog::info("Worker {} finished; total items processed: {}", worker_id, count);
                     });
                 threads.push_back(std::move(t));
             }

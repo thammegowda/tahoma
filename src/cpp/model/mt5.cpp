@@ -162,7 +162,8 @@ namespace tahoma::model::mt5 {
         }
 
         if (mask.defined()) {
-            attn_weights = attn_weights.masked_fill(mask, -pow(2, attn_weights.dtype() == torch::kHalf ? 14 : 30));
+            const auto low_num = attn_weights.dtype() == torch::kHalf ? -pow(2,  14 ) : -1e9;
+            attn_weights = attn_weights.masked_fill(mask, low_num);
         }
         attn_weights = F::softmax(attn_weights, -1);
         attn_weights = dropout(attn_weights);

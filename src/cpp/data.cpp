@@ -233,9 +233,10 @@ namespace tahoma::data {
     auto DataLoader::sort_examples(Generator<Example> examples, size_t buffer_size,
         std::function<int64_t(const Example&)> key_func, bool reverse) -> Generator<Example> {
         std::vector<Example> buffer;
+        buffer.reserve(buffer_size);
         std::vector<size_t> keys(buffer_size);   // sort keys
         std::vector<size_t> indices(buffer_size);
-        size_t idx = -1;
+        size_t last_idx = -1;
         if (buffer_size < 1) {
             throw std::runtime_error("buffer_size must be >= 1, given: " + buffer_size);
         }
@@ -245,23 +246,24 @@ namespace tahoma::data {
             };
 
         for (auto ex : examples) {
-            idx++;
+            last_idx++;
             buffer.push_back(ex);
-            indices[idx] = idx;
-            keys[idx] = key_func(ex);
+            indices[last_idx] = last_idx;
+            keys[last_idx] = key_func(ex);
             if (buffer.size() == buffer_size) {
                 std::sort(indices.begin(), indices.end(), compare);
                 for (auto i : indices) {
                     co_yield buffer[i];
                 }
                 buffer.clear();
-                idx = -1;
+                last_idx = -1;
             }
         }
-        // the last buffer maybe not full to buffer_size
+        // the last buffer maybe not be full to the buffer_size
         if (!buffer.empty()) {
-            std::sort(indices.begin(), indices.begin() + idx, compare);
-            for (size_t i = 0; i < idx; ++i) {
+            assert(last_idx >= 0 && last_idx < buffer.size());
+            std::sort(indices.begin(), indices.begin() + last_idx, compare);
+            for (size_t i = 0; i <= last_idx; ++i) {
                 co_yield buffer[indices[i]];
             }
         }
@@ -446,7 +448,7 @@ namespace tahoma::data {
             const auto worker_id = ++status.n_workers_started;
             lock.unlock();
             spdlog::info("Worker {} started", worker_id);
-            
+
             size_t count = 0;
             while (true) {
                 std::unique_lock<std::mutex> lock(mutex);
