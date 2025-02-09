@@ -1,0 +1,4 @@
+models/
+data/*.score.*
+# gold / expected score files for comparison
+!data/*score.*expect.txt

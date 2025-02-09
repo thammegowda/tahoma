@@ -10,7 +10,6 @@ target_link_libraries(tahoma-tests PUBLIC tahoma_lib Backward::Interface)
 
 
 set(TEST_CONFIG ${CMAKE_SOURCE_DIR}/examples/transformer-nmt.yaml)
-set(TEST_CONFIG ${CMAKE_SOURCE_DIR}/examples/transformer-nmt.yaml)
 
 # tests that require a config file to run
 set(CONFIG_BASED_TESTS
@@ -35,3 +34,11 @@ add_test(NAME npz_load
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # TODO: add tests for model persistence and loading
+
+# pytest based tests
+add_test(NAME pytests
+    COMMAND python -m pytest -vs ${CMAKE_SOURCE_DIR}/tests
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_property(TEST pytests PROPERTY LABELS "pytests")
+set_property(TEST pytests PROPERTY ENVIRONMENT "CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR}")

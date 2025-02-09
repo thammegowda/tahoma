@@ -1,0 +1,7 @@
+# pyproject.toml
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -vs --log-cli-level=DEBUG"
+testpaths = [
+    "tests",
+]
